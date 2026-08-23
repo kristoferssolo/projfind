@@ -14,9 +14,6 @@ use tokio::{
 };
 use tracing::{debug, warn};
 
-/// A `.git` directory marks a repository. A `.git` *file* marks a submodule or
-/// a worktree, which belongs to the repository owning it rather than standing
-/// on its own, so only the directory counts.
 const GIT_DIR: &str = ".git";
 
 pub struct DirectoryScan {
@@ -24,18 +21,11 @@ pub struct DirectoryScan {
     pub marker_files: Vec<PathBuf>,
 }
 
-/// Walks `dir` once, collecting Git repositories and marker files together.
-///
-/// Repositories and markers share a single `fd` run because searching for them
-/// separately reads every directory twice over. `--prune` stops the walk at
-/// each `.git`, whose object store dwarfs the tree around it, and `--follow`
-/// descends into symlinked directories, which `fd` otherwise skips unless the
-/// symlink is the search root itself.
+/// Scans a directory for repositories and marker files.
 ///
 /// # Errors
 ///
-/// Fails if `fd` cannot be spawned or its output cannot be read. A non-zero
-/// exit from `fd` itself is logged and the partial results are kept.
+/// Returns an error if `fd` cannot run or its output cannot be read.
 pub async fn scan_directory(
     deps: &Dependencies,
     dir: &Path,
@@ -92,8 +82,6 @@ pub async fn scan_directory(
     Ok(scan)
 }
 
-/// Anchored so `fd` rejects near misses such as `package.json.bak` itself,
-/// rather than streaming them over for us to discard.
 fn search_pattern(marker_names: &[String]) -> String {
     let alternatives = once(escape(GIT_DIR))
         .chain(marker_names.iter().map(|name| escape(name)))

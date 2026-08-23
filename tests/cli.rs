@@ -1,9 +1,3 @@
-//! The binary's own surface: arguments, configuration files, what lands on
-//! stdout versus stderr, and what a failure looks like.
-//!
-//! Which directories count as projects is covered in `discovery.rs`; a case
-//! belongs here only if it needs the process.
-
 use color_eyre::eyre::{Result, bail};
 use std::{
     ffi::{OsStr, OsString},
@@ -15,9 +9,6 @@ use tempfile::TempDir;
 
 const BIN: &str = env!("CARGO_BIN_EXE_projfind");
 
-/// One invocation of the binary, with the developer's own environment kept out
-/// of it: a real `~/.config/projfind/config.toml` would otherwise decide what
-/// these tests search for.
 struct Run {
     config_home: TempDir,
     home: Option<PathBuf>,
@@ -38,7 +29,6 @@ impl Run {
         self
     }
 
-    /// Writes `contents` where this run will look for its configuration.
     fn config(self, contents: &str) -> Result<Self> {
         let dir = self.config_home.path().join("projfind");
         create_dir_all(&dir)?;
@@ -65,7 +55,6 @@ impl Run {
         Ok(command.output()?)
     }
 
-    /// The printed projects, after asserting the run succeeded.
     fn projects(&self) -> Result<Vec<String>> {
         let output = self.output()?;
         if !output.status.success() {
@@ -81,7 +70,6 @@ impl Run {
             .collect())
     }
 
-    /// The stderr of a run that was expected to fail.
     fn failure(&self) -> Result<String> {
         let output = self.output()?;
         if output.status.success() {
@@ -95,7 +83,6 @@ impl Run {
     }
 }
 
-/// Two projects, named so that sorted output is `alpha` before `beta`.
 fn sample_tree() -> Result<TempDir> {
     let temp = TempDir::new()?;
     create_dir_all(temp.path().join("alpha/.git"))?;
@@ -152,8 +139,6 @@ fn depth_zero_finds_nothing_below_the_root() -> Result<()> {
     Ok(())
 }
 
-/// A count of zero would ask for an empty answer, which is never what anyone
-/// means, so `clap` rejects it before the search starts.
 #[test]
 fn zero_max_results_is_rejected() -> Result<()> {
     let stderr = Run::new()?
@@ -182,8 +167,6 @@ fn a_missing_path_fails_with_a_readable_error() -> Result<()> {
     Ok(())
 }
 
-/// Nothing is printed by default beyond the results, so the output pipes
-/// straight into a picker.
 #[test]
 fn a_default_run_prints_nothing_but_projects() -> Result<()> {
     let temp = sample_tree()?;
@@ -198,8 +181,6 @@ fn a_default_run_prints_nothing_but_projects() -> Result<()> {
     Ok(())
 }
 
-/// `--verbose` has to keep its diagnostics off stdout, or it would break the
-/// pipe it exists to help debug.
 #[test]
 fn verbose_diagnostics_stay_off_stdout() -> Result<()> {
     let temp = sample_tree()?;
@@ -215,8 +196,6 @@ fn verbose_diagnostics_stay_off_stdout() -> Result<()> {
     Ok(())
 }
 
-/// Only a shell expands `~`, so the binary contracts it back itself when
-/// printing, and the result still has to be a path that resolves.
 #[test]
 fn projects_under_home_print_with_a_tilde() -> Result<()> {
     let temp = sample_tree()?;
@@ -227,8 +206,6 @@ fn projects_under_home_print_with_a_tilde() -> Result<()> {
     Ok(())
 }
 
-/// A configured `~` is expanded on the way in, which is the half of the round
-/// trip a shell would otherwise have done.
 #[test]
 fn configured_home_paths_are_expanded() -> Result<()> {
     let temp = sample_tree()?;
@@ -249,8 +226,6 @@ fn the_configuration_file_replaces_the_built_in_defaults() -> Result<()> {
     write_all(&[
         (&workspace.join("workspace.root"), ""),
         (&workspace.join("member/package.json"), "{}"),
-        // A default marker, to prove the configured list replaced the shipped
-        // one rather than adding to it.
         (
             &temp.path().join("rust/Cargo.toml"),
             "[package]\nname = \"rust\"\n",
@@ -286,8 +261,6 @@ fn command_line_paths_override_the_configured_ones() -> Result<()> {
     Ok(())
 }
 
-/// A typo in a key would otherwise be silently ignored, leaving the setting
-/// looking applied.
 #[test]
 fn an_unknown_configuration_key_is_rejected() -> Result<()> {
     let stderr = Run::new()?.config("dpeth = 3\n")?.failure()?;

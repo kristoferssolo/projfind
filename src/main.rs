@@ -35,8 +35,6 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Diagnostics go to stderr, so stdout stays a clean list of paths for
-/// whatever the results are piped into.
 fn init_logging(verbose: bool) -> Result<()> {
     let level = if verbose { Level::INFO } else { Level::ERROR };
     let subscriber = FmtSubscriber::builder()

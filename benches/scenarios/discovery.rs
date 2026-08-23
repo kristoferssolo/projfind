@@ -1,8 +1,3 @@
-//! End-to-end searches, the number a user actually waits on.
-//!
-//! Every sample spawns `fd` and walks a real tree, so these are the slowest
-//! benchmarks here and the only ones whose result includes the scanner.
-
 use crate::common::tree;
 use color_eyre::eyre::Result;
 use criterion::{BenchmarkId, Criterion, Throughput};
@@ -13,8 +8,6 @@ use tokio::runtime::Runtime;
 
 type Shape = fn(&Path, usize) -> Result<Vec<std::path::PathBuf>>;
 
-/// A monorepo collapses to one result and a flat tree to `count` of them, so
-/// the pair brackets the work the resolver has to do after a scan.
 const SHAPES: [(&str, Shape); 2] = [
     ("flat_repos", tree::flat_repos),
     ("monorepo", tree::monorepo),
@@ -22,8 +15,6 @@ const SHAPES: [(&str, Shape); 2] = [
 
 const SIZES: [usize; 3] = [16, 128, 512];
 
-/// Deep enough for every shape here, and fixed so the numbers do not move when
-/// the shipped default does.
 const SEARCH_DEPTH: usize = 8;
 
 pub fn benchmark_discovery(c: &mut Criterion) {
@@ -53,8 +44,6 @@ pub fn benchmark_discovery(c: &mut Criterion) {
     group.finish();
 }
 
-/// The shipped defaults, pointed at one tree: benchmarking against the real
-/// marker list keeps the `fd` pattern the same size as in production.
 fn config_for(root: &Path) -> Config {
     let mut config = Config::defaults().expect("the built-in configuration parses");
     config.paths = vec![root.to_path_buf()];

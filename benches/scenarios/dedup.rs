@@ -1,10 +1,3 @@
-//! Folding resolved roots into the result set.
-//!
-//! Pure path arithmetic, so no tree is built here. The point is the shape of
-//! the growth: coverage is an ancestor lookup rather than a comparison against
-//! every project found so far, and this is what would catch that turning
-//! quadratic.
-
 use criterion::{BenchmarkId, Criterion, Throughput};
 use projfind::finder::is_covered;
 use std::{collections::HashSet, hint::black_box, path::PathBuf};
@@ -26,8 +19,6 @@ pub fn benchmark_dedup(c: &mut Criterion) {
     group.finish();
 }
 
-/// The fold `find_projects` runs: candidates arrive shallowest first, and each
-/// either joins the set or is absorbed by a project already in it.
 fn absorb(candidates: &[PathBuf]) -> HashSet<PathBuf> {
     let mut projects = HashSet::with_capacity(candidates.len());
 
@@ -40,9 +31,6 @@ fn absorb(candidates: &[PathBuf]) -> HashSet<PathBuf> {
     projects
 }
 
-/// Half the candidates are members that survive, half are directories nested
-/// under one of them and get absorbed, so both branches of the check are paid
-/// for. Sorted, as `find_projects` sorts before folding.
 fn candidates(count: usize) -> Vec<PathBuf> {
     let mut candidates = (0..count / 2)
         .flat_map(|index| {

@@ -1,8 +1,3 @@
-//! Resolving markers to the root they belong to.
-//!
-//! This is the part of a search that is projfind's own work rather than `fd`'s,
-//! and the part that grows with the size of a workspace.
-
 use crate::common::tree;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 use projfind::{config::Config, finder::root::RootResolver};
@@ -12,9 +7,6 @@ use tempfile::TempDir;
 const MEMBER_COUNTS: [usize; 3] = [16, 128, 1024];
 const NESTING_LEVELS: [usize; 3] = [4, 16, 64];
 
-/// A workspace hands the resolver thousands of members sharing one root. Cold
-/// and warm are reported side by side because the gap between them *is* the
-/// memoisation: if it ever closes, the caches have stopped working.
 pub fn benchmark_root_resolution(c: &mut Criterion) {
     let workspace_files = Config::defaults()
         .expect("the built-in configuration parses")
@@ -46,8 +38,6 @@ pub fn benchmark_root_resolution(c: &mut Criterion) {
     group.finish();
 }
 
-/// One marker, many ancestors: the cost of a single cache miss, which grows
-/// with how far the marker sits below its root.
 pub fn benchmark_deep_ascent(c: &mut Criterion) {
     let workspace_files = Config::defaults()
         .expect("the built-in configuration parses")

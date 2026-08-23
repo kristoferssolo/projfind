@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use tracing::info;
 use which::which;
 
-/// Debian and Ubuntu package `fd` as `fdfind`.
 const FD_BINARIES: [&str; 2] = ["fd", "fdfind"];
 
 #[derive(Debug, Clone)]
@@ -18,11 +17,11 @@ impl Dependencies {
         }
     }
 
-    /// Locates `fd` on `PATH`, accepting either name it ships under.
+    /// Finds `fd` or `fdfind` on `PATH`.
     ///
     /// # Errors
     ///
-    /// Fails if neither `fd` nor `fdfind` is installed.
+    /// Returns an error when neither binary is available.
     pub fn check() -> Result<Self> {
         info!("Checking dependencies...");
 

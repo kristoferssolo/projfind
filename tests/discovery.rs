@@ -1,9 +1,3 @@
-//! How trees on disk turn into the reported project list.
-//!
-//! These drive the library rather than the binary, so a case is a tree shape
-//! and an expected set of roots, with no argument parsing or stdout in between.
-//! `fd` still has to be on `PATH`: the scan is the real one.
-
 use claims::assert_err;
 use color_eyre::eyre::{Result, eyre};
 use projfind::{
@@ -16,13 +10,8 @@ use std::{
 };
 use tempfile::TempDir;
 
-/// Deep enough to reach the bottom of every tree below, and fixed so these
-/// tests do not start failing when the shipped default depth changes.
 const TEST_DEPTH: usize = 12;
 
-/// The shipped configuration, pointed at one tree. Reading the real defaults
-/// rather than a hand-written list keeps the tests honest about which markers
-/// projfind actually ships with.
 fn config_for(root: &Path) -> Result<Config> {
     let mut config = Config::defaults()?;
     config.paths = vec![root.to_path_buf()];
@@ -30,8 +19,6 @@ fn config_for(root: &Path) -> Result<Config> {
     Ok(config)
 }
 
-/// Runs a search and returns the roots relative to `root`, so an assertion
-/// spells out a tree shape instead of a temporary directory.
 async fn search(root: &Path, config: Config) -> Result<Vec<PathBuf>> {
     let projects = ProjectFinder::new(config, Dependencies::check()?)
         .find_projects()
@@ -48,7 +35,6 @@ async fn search(root: &Path, config: Config) -> Result<Vec<PathBuf>> {
         .collect()
 }
 
-/// The common case: search one tree with the shipped defaults.
 async fn projects_in(root: &Path) -> Result<Vec<PathBuf>> {
     search(root, config_for(root)?).await
 }
@@ -62,7 +48,6 @@ fn repository(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Writes `contents` to `path`, creating the directories above it.
 fn file(path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         create_dir_all(parent)?;
@@ -85,8 +70,6 @@ async fn repositories_and_marker_directories_are_both_projects() -> Result<()> {
     Ok(())
 }
 
-/// A `.git` file marks a worktree or a submodule, which belongs to the
-/// repository that owns it rather than standing on its own.
 #[tokio::test]
 async fn a_git_file_is_not_a_repository() -> Result<()> {
     let temp = TempDir::new()?;
@@ -101,8 +84,6 @@ async fn a_git_file_is_not_a_repository() -> Result<()> {
     Ok(())
 }
 
-/// Vendored or submoduled repositories are checkouts in their own right, so
-/// they are reported even though an outer repository encloses them.
 #[tokio::test]
 async fn nested_repositories_are_reported_separately() -> Result<()> {
     let temp = TempDir::new()?;
@@ -116,8 +97,6 @@ async fn nested_repositories_are_reported_separately() -> Result<()> {
     Ok(())
 }
 
-/// `.git` holds an object store far larger than the tree around it, so the
-/// scan stops at it rather than walking in.
 #[tokio::test]
 async fn git_directories_are_not_searched_for_markers() -> Result<()> {
     let temp = TempDir::new()?;
@@ -152,8 +131,6 @@ async fn a_cargo_workspace_reports_only_its_root() -> Result<()> {
     Ok(())
 }
 
-/// The `[workspace]` table is enough on its own: a checkout that has not been
-/// `git init`ed still collapses to one project.
 #[tokio::test]
 async fn a_cargo_workspace_absorbs_members_without_a_repository() -> Result<()> {
     let temp = TempDir::new()?;
@@ -190,8 +167,6 @@ async fn package_json_workspaces_absorb_their_members() -> Result<()> {
     Ok(())
 }
 
-/// `workspace_files` names manifests projfind does not parse, such as pnpm's,
-/// whose mere presence marks the root.
 #[tokio::test]
 async fn a_configured_workspace_file_absorbs_members() -> Result<()> {
     let temp = TempDir::new()?;
@@ -208,8 +183,6 @@ async fn a_configured_workspace_file_absorbs_members() -> Result<()> {
     Ok(())
 }
 
-/// A project nested directly inside another is usually a deliberate second
-/// project; anything further down is part of the one above it.
 #[tokio::test]
 async fn a_direct_child_is_a_project_but_a_grandchild_is_not() -> Result<()> {
     let temp = TempDir::new()?;
@@ -227,8 +200,6 @@ async fn a_direct_child_is_a_project_but_a_grandchild_is_not() -> Result<()> {
     Ok(())
 }
 
-/// Build files chain: a `Makefile` in a subdirectory is nearly always included
-/// by the one above it, so the outermost wins.
 #[tokio::test]
 async fn build_files_resolve_to_the_outermost_one() -> Result<()> {
     let temp = TempDir::new()?;
@@ -240,8 +211,6 @@ async fn build_files_resolve_to_the_outermost_one() -> Result<()> {
     Ok(())
 }
 
-/// `--follow` exists so a symlinked directory of projects is searched; both
-/// paths reach a real project, so both are reported.
 #[tokio::test]
 async fn symlinked_directories_are_followed() -> Result<()> {
     let temp = TempDir::new()?;
@@ -268,8 +237,6 @@ async fn the_depth_limit_bounds_the_search() -> Result<()> {
     Ok(())
 }
 
-/// Truncation happens after sorting, so the same tree always yields the same
-/// prefix rather than whichever scan finished first.
 #[tokio::test]
 async fn max_results_keeps_the_first_roots_in_order() -> Result<()> {
     let temp = TempDir::new()?;
@@ -311,8 +278,6 @@ async fn several_search_paths_are_merged() -> Result<()> {
     Ok(())
 }
 
-/// A path that is not a directory is a mistake in the configuration, not a
-/// directory that happens to be empty, so the search refuses to guess.
 #[tokio::test]
 async fn a_search_path_that_is_not_a_directory_fails() -> Result<()> {
     let temp = TempDir::new()?;

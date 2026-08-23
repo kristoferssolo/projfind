@@ -18,13 +18,6 @@ use tracing::{debug, info};
 
 const MAX_CONCURRENT_SEARCHES: usize = 8;
 
-/// A candidate is redundant when `known` already holds it or holds one of its
-/// ancestors, except for the immediate parent: a direct child of a project is
-/// still a project of its own.
-///
-/// Ancestors are looked up rather than compared against every known project,
-/// which keeps a monorepo's thousands of markers from turning this into a
-/// quadratic scan.
 #[must_use]
 pub fn is_covered<S: BuildHasher>(candidate: &Path, known: &HashSet<PathBuf, S>) -> bool {
     known.contains(candidate)
@@ -53,13 +46,11 @@ impl ProjectFinder {
         }
     }
 
-    /// Searches every configured path and returns the project roots found,
-    /// sorted and free of directories already covered by an outer project.
+    /// Finds sorted project roots.
     ///
     /// # Errors
     ///
-    /// Fails if a configured path is not a directory, or if every search
-    /// fails; a single failing directory is only logged.
+    /// Returns an error if no configured directory can be searched.
     pub async fn find_projects(&self) -> Result<Vec<PathBuf>> {
         let scans = self.scan_all().await?;
 
@@ -68,8 +59,6 @@ impl ProjectFinder {
             .flat_map(|scan| scan.git_repos.iter().cloned())
             .collect::<HashSet<_>>();
 
-        // Shallowest first, so an outer project always gets the chance to
-        // absorb the markers nested underneath it.
         let mut candidates = self.resolve_marker_roots(&scans)?;
         candidates.sort_unstable();
         candidates.dedup();
@@ -90,11 +79,6 @@ impl ProjectFinder {
         Ok(projects)
     }
 
-    /// Runs one scan per configured search directory, capped at
-    /// [`MAX_CONCURRENT_SEARCHES`] so a long path list cannot swamp the disk.
-    ///
-    /// A directory that fails is dropped with a log line; the search only fails
-    /// outright when every directory does.
     async fn scan_all(&self) -> Result<Vec<DirectoryScan>> {
         let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_SEARCHES));
         let mut handles = Vec::with_capacity(self.config.paths.len());

@@ -24,9 +24,9 @@ fmt-check:
 clippy:
     cargo clippy --workspace --all-features --all-targets -- --deny warnings
 
-# Run unit and integration tests. Requires `fd` on PATH.
+# Requires `fd` on PATH.
 test *ARGS:
-    cargo nextest run --all-features --all-targets {{ ARGS }}
+    cargo nextest run --all-features {{ ARGS }}
 
 # Build the documentation, private items included.
 doc *ARGS:

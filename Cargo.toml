@@ -8,7 +8,7 @@ repository = "https://github.com/kristoferssolo/projfind"
 documentation = "https://docs.rs/projfind"
 homepage = "https://github.com/kristoferssolo/projfind"
 license = "MIT OR Apache-2.0"
-keywords = [ "cli", "string", "text", "utility" ]
+keywords = [ "cli", "project", "discovery", "developer-tools" ]
 categories = [ "command-line-utilities" ]
 exclude = [
   ".github/",

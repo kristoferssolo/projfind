@@ -29,14 +29,8 @@ const WORKSPACE_RULES: [(&str, ContentTest); 8] = [
     ("turbo.json", ContentTest::NonEmpty),
 ];
 
-/// Nothing panics while a cache guard is held, so poisoning cannot happen.
 const POISONED: &str = "resolver cache lock poisoned";
 
-/// Resolves the project root a marker file belongs to.
-///
-/// Resolution walks the filesystem one directory at a time, so both the
-/// per-directory workspace verdicts and the final roots are memoised: a
-/// monorepo hands us thousands of markers that share a handful of ancestors.
 #[derive(Debug)]
 pub struct RootResolver {
     workspace_files: Box<[String]>,
@@ -54,17 +48,15 @@ impl RootResolver {
         }
     }
 
-    /// Returns the project root that the marker `marker_name` in `dir`
-    /// belongs to, which is `dir` itself when nothing above it qualifies.
+    /// Resolves a marker's project root.
     ///
     /// # Errors
     ///
-    /// Fails if a candidate manifest exists but cannot be read.
+    /// Returns an error if a workspace manifest cannot be read.
     ///
     /// # Panics
     ///
-    /// Panics if a cache lock is poisoned, which requires a panic while a
-    /// guard is held and so cannot happen here.
+    /// Panics if a cache lock is poisoned.
     pub fn resolve(&self, dir: &Path, marker_name: &str) -> Result<PathBuf> {
         let cache_key = (dir.to_path_buf(), MarkerType::from(marker_name));
 
@@ -180,9 +172,6 @@ fn is_git_repo(dir: &Path) -> bool {
     dir.join(".git").is_dir()
 }
 
-/// Walks upwards until `is_root` accepts a directory or a repository encloses
-/// it. The repository test comes first because it is a single `stat`, while
-/// `is_root` may have to read every workspace manifest in the directory.
 fn ascend_to_root<F>(dir: &Path, is_root: F) -> Result<PathBuf>
 where
     F: Fn(&Path) -> Result<bool>,

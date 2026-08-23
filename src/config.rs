@@ -19,19 +19,16 @@ const DEFAULT_CONFIG: &str = include_str!("../config/config.toml");
     about = "Find coding projects in specified directories"
 )]
 struct Cli {
-    /// Directories to search for projects [default: configuration or `.`]
+    #[arg(help = "Directories to search")]
     paths: Vec<PathBuf>,
 
-    /// Maximum search depth [default: configuration or 5]
-    #[arg(short, long)]
+    #[arg(short, long, help = "Maximum search depth")]
     depth: Option<usize>,
 
-    /// Show verbose output
-    #[arg(short, long)]
+    #[arg(short, long, help = "Print search progress")]
     verbose: bool,
 
-    /// Maximum number of results [default: configuration or unlimited]
-    #[arg(short = 'n', long)]
+    #[arg(short = 'n', long, help = "Maximum number of results")]
     max_results: Option<NonZeroUsize>,
 }
 
@@ -60,24 +57,20 @@ pub struct Config {
 }
 
 impl Config {
-    /// Layers the configuration file over the built-in defaults, then the
-    /// command line over both.
+    /// Loads the effective configuration.
     ///
     /// # Errors
     ///
-    /// Fails if the configuration file exists but cannot be read or parsed.
+    /// Returns an error when the configuration file cannot be read or parsed.
     pub fn load() -> Result<Self> {
         Self::from_sources(Cli::parse(), config_file_path().as_deref())
     }
 
-    /// The configuration compiled into the binary, before any file or command
-    /// line overrides. Search paths are still unexpanded, so a configured `~`
-    /// stays verbatim.
+    /// Returns the embedded defaults.
     ///
     /// # Errors
     ///
-    /// Fails only if the embedded `config/config.toml` is not valid TOML, which
-    /// a passing test suite rules out.
+    /// Returns an error if the embedded TOML is invalid.
     pub fn defaults() -> Result<Self> {
         toml::from_str(DEFAULT_CONFIG)
             .map_err(|source| ProjectFinderError::ParseDefaultConfig { source })
@@ -97,7 +90,6 @@ impl Config {
         Ok(config)
     }
 
-    /// Configuration files carry `~` verbatim, since only a shell expands it.
     fn expand_paths(&mut self, home: Option<&Path>) {
         for path in &mut self.paths {
             *path = expand_tilde(path, home);
@@ -105,8 +97,7 @@ impl Config {
     }
 }
 
-/// Rewrites a leading `~` or `~/` to `home`. The `~user` form is left alone:
-/// resolving it needs the password database, and nothing here wants that.
+// `~user` is intentionally left unchanged.
 fn expand_tilde(path: &Path, home: Option<&Path>) -> PathBuf {
     let (Some(home), Ok(rest)) = (home, path.strip_prefix("~")) else {
         return path.to_path_buf();
@@ -115,9 +106,6 @@ fn expand_tilde(path: &Path, home: Option<&Path>) -> PathBuf {
     home.join(rest)
 }
 
-/// The inverse of tilde expansion, for printing: shortens a path under `home`
-/// back to `~/...`. Paths elsewhere are returned unchanged, so the output stays
-/// a valid path either way.
 #[must_use]
 pub fn contract_tilde(path: &Path, home: Option<&Path>) -> PathBuf {
     let Some(rest) = home.and_then(|home| path.strip_prefix(home).ok()) else {
