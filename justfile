@@ -26,7 +26,7 @@ fmt-check:
 
 # Lint with the pedantic and nursery groups denied, as CI does.
 clippy:
-    cargo clippy --locked --workspace --all-features --all-targets -- --deny warnings
+    cargo clippy --workspace --all-features --all-targets -- --deny warnings
 
 # Run unit and integration tests. Requires `fd` on PATH.
 test *ARGS:
@@ -34,7 +34,7 @@ test *ARGS:
 
 # Build the documentation, private items included.
 doc *ARGS:
-    cargo doc --locked --workspace --all-features --document-private-items --no-deps {{ ARGS }}
+    cargo doc --workspace --all-features --document-private-items --no-deps {{ ARGS }}
 
 # Run the binary against PATHS, forwarding any flags.
 run *ARGS:

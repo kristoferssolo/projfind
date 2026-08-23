@@ -1,5 +1,5 @@
 use crate::common::utils::BASE_DIR;
-use anyhow;
+use color_eyre::eyre::{Result, eyre};
 use csv::Reader;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
@@ -53,7 +53,7 @@ struct Modified(#[serde(deserialize_with = "deserialize_u64_from_empty")] u64);
 #[derive(Debug, Clone, Deserialize)]
 struct Permissions(#[serde(deserialize_with = "deserialize_u16_from_empty")] u16);
 
-pub fn setup_entries() -> anyhow::Result<TempDir> {
+pub fn setup_entries() -> Result<TempDir> {
     let temp_dir = TempDir::new()?;
 
     let fixtures_dir = PathBuf::from(BASE_DIR).join("benches/fixtures");
@@ -75,7 +75,7 @@ pub fn setup_entries() -> anyhow::Result<TempDir> {
     Ok(temp_dir)
 }
 
-fn last_snaphow_file(dir: &Path) -> anyhow::Result<PathBuf> {
+fn last_snaphow_file(dir: &Path) -> Result<PathBuf> {
     let re = Regex::new(r"^snapshot-(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})\.csv$")?;
     let mut snapshots = fs::read_dir(dir)?
         .filter_map(|entry| {
@@ -101,7 +101,7 @@ fn last_snaphow_file(dir: &Path) -> anyhow::Result<PathBuf> {
     snapshots
         .last()
         .map(|(_, path)| path.clone())
-        .ok_or_else(|| anyhow::anyhow!("No snapshot files found in directory"))
+        .ok_or_else(|| eyre!("No snapshot files found in directory"))
 }
 
 fn deserialize_u64_from_empty<'de, D>(deserializer: D) -> Result<u64, D::Error>
@@ -165,7 +165,7 @@ impl<'de> Deserialize<'de> for EntryType {
 }
 
 impl FileEntry {
-    fn to_tempfile(&self, base: &Path) -> anyhow::Result<()> {
+    fn to_tempfile(&self, base: &Path) -> Result<()> {
         let full_path = base.join(&self.path);
         match self.entry_type {
             EntryType::Dir => create_dir(&full_path),
@@ -177,7 +177,7 @@ impl FileEntry {
     }
 }
 
-fn create_file(path: &Path) -> anyhow::Result<()> {
+fn create_file(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         create_dir(parent)?;
     }
@@ -185,7 +185,7 @@ fn create_file(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn create_dir(path: &Path) -> anyhow::Result<()> {
+fn create_dir(path: &Path) -> Result<()> {
     create_dir_all(path)?;
     Ok(())
 }

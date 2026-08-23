@@ -3,7 +3,7 @@
 //! These require `fd` on `PATH`, the same dependency the binary itself checks
 //! for at startup.
 
-use anyhow::{Result, bail};
+use color_eyre::eyre::{Result, bail};
 use std::{
     fs::{create_dir_all, write},
     path::{Path, PathBuf},
