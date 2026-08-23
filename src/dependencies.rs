@@ -1,18 +1,20 @@
 use crate::errors::{ProjectFinderError, Result};
+use std::path::PathBuf;
 use tracing::info;
 use which::which;
 
-const FD_PATH: [&str; 2] = ["fd", "fdfind"];
+/// Binary names `fd` ships under. Debian and Ubuntu rename it to `fdfind`.
+const FD_BINARIES: [&str; 2] = ["fd", "fdfind"];
 
 /// Represents external dependencies required by the application.
 #[derive(Debug, Clone)]
 pub struct Dependencies {
-    pub fd_path: String,
+    pub fd_path: PathBuf,
 }
 
 impl Dependencies {
     /// Creates a new instance of `Dependencies` from the given `fd` binary path.
-    pub fn new(fd_path: impl Into<String>) -> Self {
+    pub fn new(fd_path: impl Into<PathBuf>) -> Self {
         Self {
             fd_path: fd_path.into(),
         }
@@ -25,27 +27,23 @@ impl Dependencies {
     ///
     /// # Errors
     ///
-    /// Returns a `ProjectFinderError::DependencyNotFound` error if `fd` is not found.
+    /// Returns [`ProjectFinderError::DependencyNotFound`] if neither `fd` nor
+    /// `fdfind` is on `PATH`.
     pub fn check() -> Result<Self> {
         info!("Checking dependencies...");
 
-        let fd_path = FD_PATH
+        FD_BINARIES
             .iter()
             .find_map(|binary| {
-                if let Ok(path) = which(binary) {
-                    let fd_path = path.to_string_lossy().into_owned();
-                    info!("Found {binary} at: {}", fd_path);
-                    return Some(fd_path);
-                }
-                None
+                let path = which(binary).ok()?;
+                info!("Found {binary} at: {}", path.display());
+                Some(Self::new(path))
             })
             .ok_or_else(|| {
                 ProjectFinderError::DependencyNotFound(
                     "Neither 'fd' nor 'fdfind' was found. Please install fd from https://github.com/sharkdp/fd"
                         .into(),
                 )
-            })?;
-
-        Ok(Self::new(fd_path))
+            })
     }
 }
