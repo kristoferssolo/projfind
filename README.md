@@ -54,10 +54,10 @@ configuration. At startup, it checks
 
 Every field is optional. A field in the user file replaces the corresponding
 built-in value. Lists are replaced, not extended. Command-line arguments
-override both.
+override both. A leading `~` in `search_dirs` expands to `$HOME`.
 
 ```toml
-search_dirs = [ "/home/me/src", "/home/me/work" ]
+search_dirs = [ "~/src", "/home/me/work" ]
 depth = 5
 verbose = false
 

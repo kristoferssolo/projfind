@@ -75,8 +75,26 @@ impl Config {
         }
 
         cli.apply_to(&mut config);
+        config.expand_paths(home().as_deref());
         Ok(config)
     }
+
+    /// Configuration files carry `~` verbatim, since only a shell expands it.
+    fn expand_paths(&mut self, home: Option<&Path>) {
+        for path in &mut self.paths {
+            *path = expand_tilde(path, home);
+        }
+    }
+}
+
+/// Rewrites a leading `~` or `~/` to `home`. The `~user` form is left alone:
+/// resolving it needs the password database, and nothing here wants that.
+fn expand_tilde(path: &Path, home: Option<&Path>) -> PathBuf {
+    let (Some(home), Ok(rest)) = (home, path.strip_prefix("~")) else {
+        return path.to_path_buf();
+    };
+
+    home.join(rest)
 }
 
 impl FileConfig {
@@ -133,6 +151,12 @@ fn read_config_file(path: &Path) -> Result<Option<FileConfig>> {
     Ok(Some(config))
 }
 
+fn home() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+}
+
 fn config_file_path() -> Option<PathBuf> {
     config_file_path_from(env::var_os("XDG_CONFIG_HOME"), env::var_os("HOME"))
 }
@@ -156,7 +180,8 @@ fn config_file_path_from(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claims::{assert_none, assert_ok};
+    use claims::{assert_none, assert_ok, assert_some};
+    use rstest::rstest;
     use std::fs::write;
     use tempfile::TempDir;
 
@@ -265,5 +290,50 @@ max_results = 20
     #[test]
     fn no_config_location_is_valid() {
         assert_none!(config_file_path_from(None, None));
+    }
+
+    #[rstest]
+    #[case(
+        "~/repos",
+        "/home/user/repos",
+        "a leading tilde becomes the home directory"
+    )]
+    #[case("~", "/home/user", "a bare tilde is the home directory itself")]
+    #[case("/tmp/~/x", "/tmp/~/x", "a tilde below the root is an ordinary name")]
+    #[case("~user/repos", "~user/repos", "the ~user form is left to the shell")]
+    #[case("./repos", "./repos", "paths without a tilde are untouched")]
+    fn tilde_expansion(#[case] input: &str, #[case] expected: &str, #[case] reason: &str) {
+        let home = PathBuf::from("/home/user");
+
+        assert_eq!(
+            expand_tilde(Path::new(input), Some(&home)),
+            PathBuf::from(expected),
+            "{reason}"
+        );
+    }
+
+    #[test]
+    fn tildes_survive_a_missing_home() {
+        assert_eq!(
+            expand_tilde(Path::new("~/repos"), None),
+            PathBuf::from("~/repos")
+        );
+    }
+
+    #[test]
+    fn configured_search_dirs_are_expanded() -> color_eyre::Result<()> {
+        let temp = TempDir::new()?;
+        let path = temp.path().join("config.toml");
+        write(&path, "search_dirs = [\"~/repos\", \"/absolute\"]\n")?;
+        let cli = Cli::try_parse_from(["project-finder"])?;
+        let home = assert_some!(home());
+
+        let config = Config::from_sources(cli, Some(&path))?;
+
+        assert_eq!(
+            config.paths,
+            [home.join("repos"), PathBuf::from("/absolute")]
+        );
+        Ok(())
     }
 }
