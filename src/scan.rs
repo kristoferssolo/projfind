@@ -22,7 +22,7 @@ pub struct DirectoryScan {
 pub async fn scan_directory(
     deps: &Dependencies,
     dir: &Path,
-    marker_names: &[&str],
+    marker_names: &[String],
     max_depth: usize,
 ) -> Result<DirectoryScan> {
     let (git_repos, marker_files) = tokio::try_join!(
@@ -39,9 +39,13 @@ pub async fn scan_directory(
 async fn find_marker_files(
     deps: &Dependencies,
     dir: &Path,
-    marker_names: &[&str],
+    marker_names: &[String],
     max_depth: usize,
 ) -> Result<HashMap<String, Vec<PathBuf>>> {
+    if marker_names.is_empty() {
+        return Ok(HashMap::new());
+    }
+
     let combined_patterns = format!(
         "({})",
         marker_names
@@ -76,7 +80,7 @@ async fn find_marker_files(
     let mut lines = BufReader::new(stdout).lines();
     let mut results = marker_names
         .iter()
-        .map(|name| ((*name).to_owned(), Vec::new()))
+        .map(|name| (name.clone(), Vec::new()))
         .collect::<HashMap<_, _>>();
 
     while let Some(line) = lines

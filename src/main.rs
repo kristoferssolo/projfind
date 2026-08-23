@@ -5,7 +5,6 @@ mod finder;
 mod scan;
 
 use crate::{config::Config, dependencies::Dependencies, finder::ProjectFinder};
-use clap::Parser;
 use color_eyre::{
     config::HookBuilder,
     eyre::{Result, WrapErr},
@@ -20,7 +19,7 @@ async fn main() -> Result<()> {
         .display_env_section(false)
         .install()?;
 
-    let config = Config::parse();
+    let config = Config::load().wrap_err("Failed to load configuration")?;
     init_logging(config.verbose).wrap_err("Failed to set up logging")?;
 
     let deps = Dependencies::check()?;

@@ -99,3 +99,52 @@ fn zero_max_results_is_rejected() -> Result<()> {
     assert!(!output.status.success());
     Ok(())
 }
+
+#[test]
+fn xdg_config_overrides_built_in_defaults() -> Result<()> {
+    let temp = TempDir::new()?;
+    let search_dir = temp.path().join("projects");
+    let workspace = search_dir.join("workspace");
+    create_dir_all(workspace.join("member"))?;
+    write(workspace.join("workspace.root"), "")?;
+    write(workspace.join("member/package.json"), "{}")?;
+
+    let ignored = search_dir.join("ignored");
+    create_dir_all(&ignored)?;
+    write(
+        ignored.join("Cargo.toml"),
+        "[package]\nname = \"ignored\"\n",
+    )?;
+
+    let config_home = temp.path().join("config");
+    let config_dir = config_home.join("project-finder");
+    create_dir_all(&config_dir)?;
+    write(
+        config_dir.join("config.toml"),
+        format!(
+            r#"
+search_dirs = ["{}"]
+marker_files = ["package.json"]
+workspace_files = ["workspace.root"]
+"#,
+            search_dir.display()
+        ),
+    )?;
+
+    let output = Command::new(BIN)
+        .env("XDG_CONFIG_HOME", config_home)
+        .output()?;
+
+    if !output.status.success() {
+        bail!(
+            "binary failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let projects = String::from_utf8(output.stdout)?
+        .lines()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    assert_eq!(projects, [workspace]);
+    Ok(())
+}

@@ -11,22 +11,6 @@ use tokio::{
     sync::RwLock,
 };
 
-pub(super) const MARKER_FILES: [&str; 13] = [
-    "package.json",
-    "pnpm-workspace.yaml",
-    "lerna.json",
-    "Cargo.toml",
-    "go.mod",
-    "pyproject.toml",
-    "CMakeLists.txt",
-    "Makefile",
-    "justfile",
-    "Justfile",
-    "deno.json",
-    "deno.jsonc",
-    "bunfig.toml",
-];
-
 const CARGO_WORKSPACE: ContentTest = ContentTest::LineStartsWith("[workspace]");
 
 const WORKSPACE_RULES: [(&str, ContentTest); 8] = [
@@ -49,24 +33,25 @@ const WORKSPACE_RULES: [(&str, ContentTest); 8] = [
     ("turbo.json", ContentTest::NonEmpty),
 ];
 
-const WORKSPACE_FILES: [&str; 5] = [
-    "pnpm-workspace.yaml",
-    "lerna.json",
-    "yarn.lock",
-    ".yarnrc.yml",
-    "workspace.json",
-];
-
 type WorkspaceCache = Arc<RwLock<HashMap<PathBuf, bool>>>;
 type RootCache = Arc<RwLock<HashMap<(PathBuf, MarkerType), PathBuf>>>;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(super) struct RootResolver {
+    workspace_files: Arc<[String]>,
     workspace_cache: WorkspaceCache,
     root_cache: RootCache,
 }
 
 impl RootResolver {
+    pub(super) fn new(workspace_files: Vec<String>) -> Self {
+        Self {
+            workspace_files: workspace_files.into(),
+            workspace_cache: Arc::default(),
+            root_cache: Arc::default(),
+        }
+    }
+
     pub(super) async fn resolve(&self, dir: &Path, marker_name: &str) -> Result<PathBuf> {
         let marker_type = MarkerType::from(marker_name);
         let cache_key = (dir.to_path_buf(), marker_type.clone());
@@ -114,7 +99,7 @@ impl RootResolver {
         }
 
         if !is_root {
-            for file in WORKSPACE_FILES {
+            for file in self.workspace_files.iter() {
                 if path_exists(&dir.join(file)).await {
                     is_root = true;
                     break;

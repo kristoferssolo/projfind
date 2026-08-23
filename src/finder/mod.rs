@@ -1,6 +1,6 @@
 mod root;
 
-use self::root::{MARKER_FILES, RootResolver};
+use self::root::RootResolver;
 use crate::{
     config::Config,
     dependencies::Dependencies,
@@ -41,11 +41,13 @@ pub struct ProjectFinder {
 
 impl ProjectFinder {
     pub fn new(config: Config, deps: Dependencies) -> Self {
+        let root_resolver = RootResolver::new(config.workspace_files.clone());
+
         Self {
             config,
             deps,
             discovered_projects: Arc::default(),
-            root_resolver: RootResolver::default(),
+            root_resolver,
         }
     }
 
@@ -114,7 +116,13 @@ impl ProjectFinder {
     }
 
     async fn process_directory(&self, dir: &Path) -> Result<()> {
-        let scan = scan_directory(&self.deps, dir, &MARKER_FILES, self.config.depth).await?;
+        let scan = scan_directory(
+            &self.deps,
+            dir,
+            &self.config.marker_files,
+            self.config.depth,
+        )
+        .await?;
 
         self.discovered_projects
             .write()

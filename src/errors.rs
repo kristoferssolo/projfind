@@ -41,6 +41,13 @@ pub enum ProjectFinderError {
         source: io::Error,
     },
 
+    #[error("Failed to parse configuration at {}", .path.display())]
+    ParseConfig {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+
     #[error("Failed to schedule the search of {}", .path.display())]
     Scheduling {
         path: PathBuf,
