@@ -4,29 +4,35 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: --deny warnings
   RUSTDOCFLAGS: --deny warnings
 jobs:
-  # Run tests.
+  # Run tests. Benches are excluded: criterion's `--test` mode would run every
+  # benchmark once per push against the fixtures, for no measurement signal.
   test:
     name: Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Install dependencies
-        run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev fd-find
+        run: sudo apt-get update; sudo apt-get install --no-install-recommends fd-find
       - name: Populate target directory from cache
         uses: Leafwing-Studios/cargo-cache@v2
         with:
           sweep-cache: true
       - name: Run tests
-        run: cargo test --locked --workspace --all-features --all-targets --release
+        run: cargo test --locked --workspace --all-features --tests --release
   # Run clippy lints.
   clippy:
     name: Clippy
@@ -34,19 +40,17 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Install dependencies
-        run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
       - name: Populate target directory from cache
         uses: Leafwing-Studios/cargo-cache@v2
         with:
           sweep-cache: true
       - name: Run clippy lints
-        run: cargo clippy --locked --workspace --all-features -- --deny warnings
+        run: cargo clippy --locked --workspace --all-features --all-targets -- --deny warnings
   # Check formatting.
   format:
     name: Format
@@ -54,7 +58,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -68,11 +72,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      - name: Install dependencies
-        run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
       - name: Populate target directory from cache
         uses: Leafwing-Studios/cargo-cache@v2
         with:

@@ -16,7 +16,7 @@ exclude = [
   "tests/",
   "benches/",
   "scripts/",
-  "justifle",
+  "justfile",
   "*.png",
   "*.md",
 ]

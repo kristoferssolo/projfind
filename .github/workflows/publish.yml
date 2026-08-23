@@ -1,97 +1,185 @@
 name: Publish
 on:
-  # Trigger this workflow when a tag is pushed in the format `v1.2.3`.
   push:
     tags:
-      # Pattern syntax: https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#filter-pattern-cheat-sheet
-      - "v[0-9]+.[0-9]+.[0-9]+*"
-  # Trigger this workflow manually via workflow dispatch.
+      - "v[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version number in the format `v1.2.3`'
+        description: Version number in the format 1.2.3
         required: true
         type: string
+permissions:
+  contents: read
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  CARGO_TERM_COLOR: always
 jobs:
+  metadata:
+    name: Resolve release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Resolve and validate release metadata
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              version="$INPUT_VERSION"
+          else
+              version="${REF_NAME#v}"
+          fi
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Version must be a valid SemVer value without a leading v"
+              exit 1
+          fi
+
+          manifest_version="$(
+              cargo metadata --no-deps --format-version 1 |
+                  jq -r '.packages[] | select(.name == "projfind") | .version'
+          )"
+          if [[ "$manifest_version" != "$version" ]]; then
+              echo "::error::projfind is version $manifest_version, not $version"
+              exit 1
+          fi
+
+          {
+              echo "tag=v$version"
+              echo "version=$version"
+          } >>"$GITHUB_OUTPUT"
   audit:
     name: Audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions-rust-lang/audit@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-  publish-crate:
+  publish:
     name: Publish to crates.io
-    needs: [audit]
+    needs:
+      - metadata
+      - audit
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - name: cargo-release Cache
-        id: cargo_release_cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/cargo-release
-          key: ${{ runner.os }}-cargo-release
-      - run: cargo install cargo-release
-        if: steps.cargo_release_cache.outputs.cache-hit != 'true'
-      - name: cargo login
-        run: cargo login ${{ secrets.CRATES_IO_API_TOKEN }}
-      - name: "cargo release publish"
-        run: |-
-          cargo release \
-            publish \
-            --workspace \
-            --all-features \
-            --allow-branch HEAD \
-            --no-confirm \
-            --no-verify \
-            --execute
-  github-release:
-    name: Create GitHub Release
-    needs: [audit]
-    permissions:
-      contents: write
+      - name: Publish crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_API_TOKEN }}
+        run: cargo publish --locked --package projfind
+  # Archive names and layout match the `[package.metadata.binstall]` templates
+  # in `Cargo.toml`, so `cargo binstall projfind` resolves them directly.
+  build-binaries:
+    name: Build projfind (${{ matrix.target }})
+    needs:
+      - metadata
+      - audit
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-    runs-on: ${{ matrix.os }}
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - name: Build binary
-        run: cargo build --release --target ${{ matrix.target }}
-      - name: Prepare assets
-        shell: bash
+      - name: Build release binary
+        run: cargo build --locked --release --bin projfind --target ${{ matrix.target }}
+      - name: Package binary
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.metadata.outputs.version }}
         run: |
-          cd target/${{ matrix.target }}/release
-          tar czf ../../projfind-${{ matrix.target }}.tar.gz projfind
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+          set -euo pipefail
+
+          archive="projfind-$VERSION-$TARGET"
+          mkdir -p "dist/$archive"
+          install -m 0755 "target/$TARGET/release/projfind" "dist/$archive/projfind"
+          cp LICENSE-APACHE LICENSE-MIT README.md "dist/$archive/"
+          tar -C dist -czf "dist/$archive.tar.gz" "$archive"
+          (
+              cd dist
+              # macOS runners ship `shasum` rather than `sha256sum`.
+              if command -v sha256sum >/dev/null; then
+                  sha256sum "$archive.tar.gz" >"$archive.tar.gz.sha256"
+              else
+                  shasum -a 256 "$archive.tar.gz" >"$archive.tar.gz.sha256"
+              fi
+          )
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v7
         with:
           name: projfind-${{ matrix.target }}
-          path: target/projfind-${{ matrix.target }}.*
-          compression-level: 0
-  create-release:
-    needs: [github-release]
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+  release:
+    name: Create GitHub release
+    needs:
+      - metadata
+      - publish
+      - build-binaries
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - name: Download projfind binaries
+        uses: actions/download-artifact@v8
         with:
-          path: artifacts
+          path: dist
+          pattern: projfind-*
           merge-multiple: true
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/projfind-*
-          generate_release_notes: true
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IS_TAG_PUSH: ${{ github.event_name == 'push' }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          assets=(dist/*.tar.gz dist/*.sha256)
+          if (( ${#assets[@]} == 0 )); then
+              echo "::error::No projfind release assets were downloaded"
+              exit 1
+          fi
+
+          args=(
+              "$TAG"
+              --generate-notes
+              --latest
+              --target "$GITHUB_SHA"
+              --title "projfind v$VERSION"
+              "${assets[@]}"
+          )
+          if [[ "$IS_TAG_PUSH" == "true" ]]; then
+              args+=(--verify-tag)
+          fi
+
+          gh release create --repo "$GITHUB_REPOSITORY" "${args[@]}"
