@@ -1,26 +1,78 @@
-use std::{convert::Infallible, str::FromStr};
+/// File names that mark a project root.
+///
+/// This list is the single source of truth: it is passed verbatim to `fd` as a
+/// set of literal patterns, and every name in it is classified by
+/// [`MarkerType::from`].
+pub const MARKER_FILES: [&str; 13] = [
+    "package.json",
+    "pnpm-workspace.yaml",
+    "lerna.json",
+    "Cargo.toml",
+    "go.mod",
+    "pyproject.toml",
+    "CMakeLists.txt",
+    "Makefile",
+    "justfile",
+    "Justfile",
+    "deno.json",
+    "deno.jsonc",
+    "bunfig.toml",
+];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// How a marker file influences project-root detection.
+///
+/// Classification is total: any unrecognized file name becomes
+/// [`MarkerType::OtherConfig`], so conversion cannot fail.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MarkerType {
+    /// Ascends to the enclosing JavaScript workspace root.
     PackageJson,
+    /// Ascends to the enclosing Cargo workspace root.
     CargoToml,
+    /// Ascends to the enclosing Deno workspace root.
     DenoJson,
+    /// Ascends to the highest directory holding the same build file.
     BuildFile(String),
+    /// Ascends to the enclosing git repository only.
     OtherConfig(String),
 }
 
-impl FromStr for MarkerType {
-    type Err = Infallible;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(match s {
+impl From<&str> for MarkerType {
+    fn from(file_name: &str) -> Self {
+        match file_name {
             "package.json" => Self::PackageJson,
             "Cargo.toml" => Self::CargoToml,
             "deno.json" | "deno.jsonc" => Self::DenoJson,
             "Makefile" | "CMakeLists.txt" | "justfile" | "Justfile" => {
-                Self::BuildFile(s.to_string())
+                Self::BuildFile(file_name.to_owned())
             }
-            _ => Self::OtherConfig(s.to_string()),
-        })
+            other => Self::OtherConfig(other.to_owned()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case("package.json", MarkerType::PackageJson)]
+    #[case("Cargo.toml", MarkerType::CargoToml)]
+    #[case("deno.json", MarkerType::DenoJson)]
+    #[case("deno.jsonc", MarkerType::DenoJson)]
+    #[case("justfile", MarkerType::BuildFile("justfile".into()))]
+    #[case("CMakeLists.txt", MarkerType::BuildFile("CMakeLists.txt".into()))]
+    #[case("go.mod", MarkerType::OtherConfig("go.mod".into()))]
+    fn classifies_known_markers(#[case] file_name: &str, #[case] expected: MarkerType) {
+        assert_eq!(MarkerType::from(file_name), expected);
+    }
+
+    #[test]
+    fn unknown_names_fall_back_to_other_config() {
+        assert_eq!(
+            MarkerType::from("never-heard-of-it"),
+            MarkerType::OtherConfig("never-heard-of-it".into())
+        );
     }
 }

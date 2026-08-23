@@ -3,7 +3,7 @@ use crate::{
     config::Config,
     dependencies::Dependencies,
     errors::{ProjectFinderError, Result},
-    marker::MarkerType,
+    marker::{MARKER_FILES, MarkerType},
 };
 use futures::future::join_all;
 use std::{
@@ -20,23 +20,7 @@ use tracing::{debug, info};
 
 type ProjectSet = Arc<RwLock<HashSet<PathBuf>>>;
 type WorkspaceCache = Arc<RwLock<HashMap<PathBuf, bool>>>;
-type RootCache = Arc<RwLock<HashMap<(PathBuf, String), PathBuf>>>;
-
-const MARKER_PATTERNS: [&str; 13] = [
-    "package.json",
-    "pnpm-workspace.yaml",
-    "lerna.json",
-    "Cargo.toml",
-    "go.mod",
-    "pyproject.toml",
-    "CMakeLists.txt",
-    "Makefile",
-    "justfile",
-    "Justfile",
-    "deno.json",
-    "deno.jsonc",
-    "bunfig.toml",
-];
+type RootCache = Arc<RwLock<HashMap<(PathBuf, MarkerType), PathBuf>>>;
 
 /// Check whether a given path exists.
 async fn path_exists(path: &Path) -> bool {
@@ -144,7 +128,7 @@ impl ProjectFinder {
         }
 
         // Look for marker files.
-        let marker_map = find_files(&self.deps, dir, &MARKER_PATTERNS, self.config.depth).await?;
+        let marker_map = find_files(&self.deps, dir, &MARKER_FILES, self.config.depth).await?;
         for (pattern, paths) in marker_map {
             for path in paths {
                 if let Some(parent_dir) = path.parent() {
@@ -158,8 +142,7 @@ impl ProjectFinder {
 
     /// Process a marker file found in a directory.
     async fn process_marker(&self, dir: &Path, marker_name: &str) -> Result<()> {
-        // Determine marker type
-        let marker_type = marker_name.parse().expect("How did we get here?");
+        let marker_type = MarkerType::from(marker_name);
 
         // Find project root
         let project_root = self.find_project_root(dir, &marker_type).await?;
@@ -195,8 +178,7 @@ impl ProjectFinder {
     }
 
     async fn find_project_root(&self, dir: &Path, marker_type: &MarkerType) -> Result<PathBuf> {
-        // Check cache
-        let cache_key = (dir.to_path_buf(), format!("{marker_type:?}"));
+        let cache_key = (dir.to_path_buf(), marker_type.clone());
         {
             let cache = self.root_cache.read().await;
             if let Some(root) = cache.get(&cache_key) {
