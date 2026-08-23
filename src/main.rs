@@ -6,49 +6,45 @@ mod finder;
 mod marker;
 
 use crate::{config::Config, dependencies::Dependencies, finder::ProjectFinder};
-use anyhow::{Result, anyhow};
 use clap::Parser;
-use std::process::exit;
+use color_eyre::{
+    config::HookBuilder,
+    eyre::{Result, WrapErr},
+};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
-async fn main() {
-    if let Err(e) = run().await {
-        eprintln!("{e}");
-        exit(1);
-    }
-}
+async fn main() -> Result<()> {
+    // A missing `fd` or an unreadable path is a user error, not a crash, so
+    // keep the report to the error chain itself.
+    HookBuilder::default()
+        .display_location_section(false)
+        .display_env_section(false)
+        .install()?;
 
-async fn run() -> Result<()> {
-    // Parse CLI arguments
     let config = Config::parse();
+    init_logging(config.verbose).wrap_err("Failed to set up logging")?;
 
-    // Setup logging
-    let log_level = if config.verbose {
-        Level::INFO
-    } else {
-        Level::ERROR
-    };
-    let subscriber = FmtSubscriber::builder().with_max_level(log_level).finish();
-
-    tracing::subscriber::set_global_default(subscriber)
-        .map_err(|e| anyhow!("Failed to set up logging: {e}"))?;
-
-    // Check for required dependencies
-    let deps = Dependencies::check().map_err(|e| anyhow!("{e}"))?;
-
-    // Create finder and search for projects
-    let finder = ProjectFinder::new(config, deps);
-
-    let projects = finder
+    let deps = Dependencies::check()?;
+    let projects = ProjectFinder::new(config, deps)
         .find_projects()
         .await
-        .map_err(|e| anyhow!("Failed to find projects: {e}"))?;
+        .wrap_err("Failed to find projects")?;
 
     for project in projects {
         println!("{}", project.display());
     }
+
+    Ok(())
+}
+
+/// Send `info` and above to stderr when verbose, otherwise errors only.
+fn init_logging(verbose: bool) -> Result<()> {
+    let level = if verbose { Level::INFO } else { Level::ERROR };
+    let subscriber = FmtSubscriber::builder().with_max_level(level).finish();
+
+    tracing::subscriber::set_global_default(subscriber)?;
 
     Ok(())
 }
