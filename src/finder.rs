@@ -1,5 +1,5 @@
 use crate::{
-    commands::{find_files, find_git_repos, grep_file_in_memory},
+    commands::{ContentTest, file_matches, find_files, find_git_repos},
     config::Config,
     dependencies::Dependencies,
     errors::{ProjectFinderError, Result},
@@ -21,6 +21,39 @@ use tracing::{debug, info};
 type ProjectSet = Arc<RwLock<HashSet<PathBuf>>>;
 type WorkspaceCache = Arc<RwLock<HashMap<PathBuf, bool>>>;
 type RootCache = Arc<RwLock<HashMap<(PathBuf, MarkerType), PathBuf>>>;
+
+/// A `Cargo.toml` declaring a workspace.
+const CARGO_WORKSPACE: ContentTest = ContentTest::LineStartsWith("[workspace]");
+
+/// Files that mark a workspace root only when their contents say so.
+const WORKSPACE_RULES: [(&str, ContentTest); 8] = [
+    (
+        "package.json",
+        ContentTest::ContainsAny(&["\"workspaces\"", "\"workspace\""]),
+    ),
+    (
+        "deno.json",
+        ContentTest::ContainsAny(&["\"workspaces\"", "\"imports\""]),
+    ),
+    (
+        "deno.jsonc",
+        ContentTest::ContainsAny(&["\"workspaces\"", "\"imports\""]),
+    ),
+    ("bunfig.toml", ContentTest::ContainsAny(&["workspaces"])),
+    ("Cargo.toml", CARGO_WORKSPACE),
+    ("rush.json", ContentTest::NonEmpty),
+    ("nx.json", ContentTest::NonEmpty),
+    ("turbo.json", ContentTest::NonEmpty),
+];
+
+/// Files that mark a workspace root just by existing.
+const WORKSPACE_FILES: [&str; 5] = [
+    "pnpm-workspace.yaml",
+    "lerna.json",
+    "yarn.lock",      // Common in yarn workspaces
+    ".yarnrc.yml",    // Yarn 2+ workspaces
+    "workspace.json", // Generic workspace file
+];
 
 /// Check whether a given path exists.
 async fn path_exists(path: &Path) -> bool {
@@ -220,9 +253,7 @@ impl ProjectFinder {
                     }
 
                     let cargo_toml = parent.join("Cargo.toml");
-                    if path_exists(&cargo_toml).await
-                        && grep_file_in_memory(&cargo_toml, r"^\[workspace\]").await?
-                    {
+                    if file_matches(&cargo_toml, CARGO_WORKSPACE).await? {
                         result = parent.to_path_buf();
                         break;
                     }
@@ -290,63 +321,37 @@ impl ProjectFinder {
         Ok(result)
     }
 
+    /// Check whether `dir` is the root of a multi-package workspace.
+    ///
+    /// Results are cached because the ascent in [`Self::find_project_root`]
+    /// revisits the same ancestors for every marker found beneath them.
     async fn is_workspace_root(&self, dir: &Path) -> Result<bool> {
-        // Check cache
-        {
-            let cache = self.workspace_cache.read().await;
-            if let Some(&result) = cache.get(dir) {
-                return Ok(result);
+        if let Some(&cached) = self.workspace_cache.read().await.get(dir) {
+            return Ok(cached);
+        }
+
+        let mut is_root = false;
+        for (file, test) in WORKSPACE_RULES {
+            if file_matches(&dir.join(file), test).await? {
+                is_root = true;
+                break;
             }
         }
 
-        // Define workspace patterns to check
-        let workspace_patterns = [
-            (dir.join("package.json"), r#"("workspaces"|"workspace")"#),
-            (dir.join("deno.json"), r#"("workspaces"|"imports")"#),
-            (dir.join("deno.jsonc"), r#"("workspaces"|"imports")"#),
-            (dir.join("bunfig.toml"), r"workspaces"),
-            (dir.join("Cargo.toml"), r"^\[workspace\]"),
-            (dir.join("rush.json"), r"."),
-            (dir.join("nx.json"), r"."),
-            (dir.join("turbo.json"), r"."),
-        ];
-
-        // Files that indicate workspaces just by existing
-        let workspace_files = [
-            dir.join("pnpm-workspace.yaml"),
-            dir.join("lerna.json"),
-            dir.join("yarn.lock"),      // Common in yarn workspaces
-            dir.join(".yarnrc.yml"),    // Yarn 2+ workspaces
-            dir.join("workspace.json"), // Generic workspace file
-        ];
-
-        // Check for workspace by pattern matching
-        for (file, pattern) in &workspace_patterns {
-            if path_exists(file).await && grep_file_in_memory(file, pattern).await? {
-                self.workspace_cache
-                    .write()
-                    .await
-                    .insert(dir.to_path_buf(), true);
-                return Ok(true);
+        if !is_root {
+            for file in WORKSPACE_FILES {
+                if path_exists(&dir.join(file)).await {
+                    is_root = true;
+                    break;
+                }
             }
         }
 
-        // Check for workspace by file existence
-        for file in &workspace_files {
-            if path_exists(file).await {
-                self.workspace_cache
-                    .write()
-                    .await
-                    .insert(dir.to_path_buf(), true);
-                return Ok(true);
-            }
-        }
-
-        // No workspace found
         self.workspace_cache
             .write()
             .await
-            .insert(dir.to_path_buf(), false);
-        Ok(false)
+            .insert(dir.to_path_buf(), is_root);
+
+        Ok(is_root)
     }
 }

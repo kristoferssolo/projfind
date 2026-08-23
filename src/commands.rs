@@ -2,10 +2,11 @@ use crate::{
     dependencies::Dependencies,
     errors::{ProjectFinderError, Result},
 };
-use regex::{Regex, escape};
+use regex::escape;
 use std::{
     collections::HashMap,
     fmt::Display,
+    io::ErrorKind,
     path::{Path, PathBuf},
     process::Stdio,
 };
@@ -168,26 +169,76 @@ pub async fn find_git_repos(
     Ok(paths)
 }
 
-/// Read a file into memory and check if it contains any match of the provided regex.
+/// A test applied to a file's contents.
 ///
-/// # Arguments
+/// These replace the regexes the workspace rules used to carry: every pattern
+/// in use was a plain substring or line-prefix check, so a regex engine bought
+/// nothing but a compile on every call and a fallible path.
+#[derive(Debug, Clone, Copy)]
+pub enum ContentTest {
+    /// Any of the given substrings appears somewhere in the file.
+    ContainsAny(&'static [&'static str]),
+    /// Some line, ignoring leading whitespace, starts with the given text.
+    LineStartsWith(&'static str),
+    /// The file holds something other than whitespace.
+    NonEmpty,
+}
+
+impl ContentTest {
+    fn matches(self, contents: &str) -> bool {
+        match self {
+            Self::ContainsAny(needles) => needles.iter().any(|needle| contents.contains(needle)),
+            Self::LineStartsWith(prefix) => contents
+                .lines()
+                .any(|line| line.trim_start().starts_with(prefix)),
+            Self::NonEmpty => !contents.trim().is_empty(),
+        }
+    }
+}
+
+/// Read `file` into memory and check its contents against `test`.
 ///
-/// - `file`: The file to read.
-/// - `pattern`: The regex pattern to search for.
-///
-/// # Returns
-///
-/// `true` if the regex matches the file’s contents, `false` otherwise.
-pub async fn grep_file_in_memory(file: &Path, pattern: &str) -> Result<bool> {
-    let contents = read_to_string(file).await.map_err(|e| {
-        ProjectFinderError::CommandExecutionFailed(format!(
+/// A missing file is not an error, it simply fails the test. That lets callers
+/// probe for optional config files with a single read rather than a stat
+/// followed by a read.
+pub async fn file_matches(file: &Path, test: ContentTest) -> Result<bool> {
+    match read_to_string(file).await {
+        Ok(contents) => Ok(test.matches(&contents)),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(ProjectFinderError::CommandExecutionFailed(format!(
             "Failed to read file {}: {e}",
             file.display()
-        ))
-    })?;
+        ))),
+    }
+}
 
-    let re = Regex::new(pattern)
-        .map_err(|e| wrap_command_error(&format!("Invalid regex patter {pattern}"), e))?;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    Ok(re.is_match(&contents))
+    const JS_WORKSPACE: ContentTest =
+        ContentTest::ContainsAny(&["\"workspaces\"", "\"workspace\""]);
+
+    #[test]
+    fn contains_any_matches_a_single_needle() {
+        assert!(JS_WORKSPACE.matches(r#"{"name": "x", "workspaces": ["a"]}"#));
+        assert!(!JS_WORKSPACE.matches(r#"{"name": "x"}"#));
+    }
+
+    #[test]
+    fn line_starts_with_ignores_position_in_file() {
+        let test = ContentTest::LineStartsWith("[workspace]");
+        // The old `^\[workspace\]` regex was anchored to the start of the whole
+        // file, so it missed any manifest with a comment or table above it.
+        assert!(test.matches("# a comment\n[workspace]\nmembers = []"));
+        assert!(test.matches("[workspace]"));
+        assert!(!test.matches("[workspace.dependencies]\n"));
+        assert!(!test.matches("[package]\nname = \"x\""));
+    }
+
+    #[test]
+    fn non_empty_ignores_whitespace_only_files() {
+        assert!(ContentTest::NonEmpty.matches("{}"));
+        assert!(!ContentTest::NonEmpty.matches("  \n\t\n"));
+    }
 }
