@@ -1,13 +1,9 @@
 use crate::errors::{ProjectFinderError, Result};
 use std::{
     collections::HashMap,
-    future::Future,
+    fs::read_to_string,
     io::ErrorKind,
     path::{Path, PathBuf},
-    sync::Arc,
-};
-use tokio::{
-    fs::{read_to_string, try_exists},
     sync::RwLock,
 };
 
@@ -33,83 +29,79 @@ const WORKSPACE_RULES: [(&str, ContentTest); 8] = [
     ("turbo.json", ContentTest::NonEmpty),
 ];
 
-type WorkspaceCache = Arc<RwLock<HashMap<PathBuf, bool>>>;
-type RootCache = Arc<RwLock<HashMap<(PathBuf, MarkerType), PathBuf>>>;
+/// Nothing panics while a cache guard is held, so poisoning cannot happen.
+const POISONED: &str = "resolver cache lock poisoned";
 
-#[derive(Debug, Clone)]
+/// Resolves the project root a marker file belongs to.
+///
+/// Resolution walks the filesystem one directory at a time, so both the
+/// per-directory workspace verdicts and the final roots are memoised: a
+/// monorepo hands us thousands of markers that share a handful of ancestors.
+#[derive(Debug)]
 pub(super) struct RootResolver {
-    workspace_files: Arc<[String]>,
-    workspace_cache: WorkspaceCache,
-    root_cache: RootCache,
+    workspace_files: Box<[String]>,
+    workspace_cache: RwLock<HashMap<PathBuf, bool>>,
+    root_cache: RwLock<HashMap<(PathBuf, MarkerType), PathBuf>>,
 }
 
 impl RootResolver {
     pub(super) fn new(workspace_files: Vec<String>) -> Self {
         Self {
             workspace_files: workspace_files.into(),
-            workspace_cache: Arc::default(),
-            root_cache: Arc::default(),
+            workspace_cache: RwLock::default(),
+            root_cache: RwLock::default(),
         }
     }
 
-    pub(super) async fn resolve(&self, dir: &Path, marker_name: &str) -> Result<PathBuf> {
-        let marker_type = MarkerType::from(marker_name);
-        let cache_key = (dir.to_path_buf(), marker_type.clone());
+    pub(super) fn resolve(&self, dir: &Path, marker_name: &str) -> Result<PathBuf> {
+        let cache_key = (dir.to_path_buf(), MarkerType::from(marker_name));
 
-        if let Some(root) = self.root_cache.read().await.get(&cache_key) {
+        if let Some(root) = self.root_cache.read().expect(POISONED).get(&cache_key) {
             return Ok(root.clone());
         }
 
-        let root = match &marker_type {
+        let root = match &cache_key.1 {
             MarkerType::PackageJson | MarkerType::DenoJson => {
-                ascend_to_root(dir, |parent| async move {
-                    self.is_workspace_root(&parent).await
-                })
-                .await?
+                ascend_to_root(dir, |parent| self.is_workspace_root(parent))?
             }
-            MarkerType::CargoToml => {
-                ascend_to_root(dir, |parent| async move {
-                    file_matches(&parent.join("Cargo.toml"), CARGO_WORKSPACE).await
-                })
-                .await?
-            }
+            MarkerType::CargoToml => ascend_to_root(dir, |parent| {
+                file_matches(&parent.join("Cargo.toml"), CARGO_WORKSPACE)
+            })?,
             MarkerType::BuildFile(name) => ascend_to_highest_build_file(dir, name),
-            MarkerType::OtherConfig => ascend_to_root(dir, |_| async { Ok(false) }).await?,
+            MarkerType::OtherConfig => ascend_to_root(dir, |_| Ok(false))?,
         };
 
         self.root_cache
             .write()
-            .await
+            .expect(POISONED)
             .insert(cache_key, root.clone());
 
         Ok(root)
     }
 
-    async fn is_workspace_root(&self, dir: &Path) -> Result<bool> {
-        if let Some(&cached) = self.workspace_cache.read().await.get(dir) {
+    fn is_workspace_root(&self, dir: &Path) -> Result<bool> {
+        if let Some(&cached) = self.workspace_cache.read().expect(POISONED).get(dir) {
             return Ok(cached);
         }
 
         let mut is_root = false;
         for (file, test) in WORKSPACE_RULES {
-            if file_matches(&dir.join(file), test).await? {
+            if file_matches(&dir.join(file), test)? {
                 is_root = true;
                 break;
             }
         }
 
         if !is_root {
-            for file in self.workspace_files.iter() {
-                if path_exists(&dir.join(file)).await {
-                    is_root = true;
-                    break;
-                }
-            }
+            is_root = self
+                .workspace_files
+                .iter()
+                .any(|file| dir.join(file).exists());
         }
 
         self.workspace_cache
             .write()
-            .await
+            .expect(POISONED)
             .insert(dir.to_path_buf(), is_root);
 
         Ok(is_root)
@@ -158,16 +150,12 @@ impl ContentTest {
     }
 }
 
-async fn file_matches(file: &Path, test: ContentTest) -> Result<bool> {
-    match read_to_string(file).await {
+fn file_matches(file: &Path, test: ContentTest) -> Result<bool> {
+    match read_to_string(file) {
         Ok(contents) => Ok(test.matches(&contents)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
         Err(error) => Err(ProjectFinderError::read_file(file, error)),
     }
-}
-
-async fn path_exists(path: &Path) -> bool {
-    try_exists(path).await.unwrap_or(false)
 }
 
 fn ancestors_above(dir: &Path) -> impl Iterator<Item = &Path> {
@@ -180,13 +168,15 @@ fn is_git_repo(dir: &Path) -> bool {
     dir.join(".git").is_dir()
 }
 
-async fn ascend_to_root<F, Fut>(dir: &Path, is_root: F) -> Result<PathBuf>
+/// Walks upwards until `is_root` accepts a directory or a repository encloses
+/// it. The repository test comes first because it is a single `stat`, while
+/// `is_root` may have to read every workspace manifest in the directory.
+fn ascend_to_root<F>(dir: &Path, is_root: F) -> Result<PathBuf>
 where
-    F: Fn(PathBuf) -> Fut,
-    Fut: Future<Output = Result<bool>>,
+    F: Fn(&Path) -> Result<bool>,
 {
     for parent in ancestors_above(dir) {
-        if is_root(parent.to_path_buf()).await? || is_git_repo(parent) {
+        if is_git_repo(parent) || is_root(parent)? {
             return Ok(parent.to_path_buf());
         }
     }
@@ -225,8 +215,8 @@ mod tests {
         leaf
     }
 
-    fn holds(file: &'static str) -> impl Fn(PathBuf) -> std::future::Ready<Result<bool>> {
-        move |dir: PathBuf| std::future::ready(Ok(dir.join(file).exists()))
+    fn holds(file: &'static str) -> impl Fn(&Path) -> Result<bool> {
+        move |dir: &Path| Ok(dir.join(file).exists())
     }
 
     #[rstest]
@@ -257,35 +247,35 @@ mod tests {
         assert_none!(ancestors_above(Path::new("relative")).next());
     }
 
-    #[tokio::test]
-    async fn ascent_stops_at_the_enclosing_repository() {
+    #[test]
+    fn ascent_stops_at_the_enclosing_repository() {
         let temp = TempDir::new().expect("create temp dir");
         let leaf = repo_with_nested_dirs(temp.path());
 
         assert_ok_eq!(
-            ascend_to_root(&leaf, holds("never-exists")).await,
+            ascend_to_root(&leaf, holds("never-exists")),
             temp.path().to_path_buf()
         );
     }
 
-    #[tokio::test]
-    async fn a_nearer_workspace_root_wins() {
+    #[test]
+    fn a_nearer_workspace_root_wins() {
         let temp = TempDir::new().expect("create temp dir");
         let leaf = repo_with_nested_dirs(temp.path());
         write(temp.path().join("a/pnpm-workspace.yaml"), "").expect("write workspace file");
 
         assert_ok_eq!(
-            ascend_to_root(&leaf, holds("pnpm-workspace.yaml")).await,
+            ascend_to_root(&leaf, holds("pnpm-workspace.yaml")),
             temp.path().join("a")
         );
     }
 
-    #[tokio::test]
-    async fn ascent_falls_back_to_the_starting_directory() {
+    #[test]
+    fn ascent_falls_back_to_the_starting_directory() {
         let dir = Path::new("no-ancestors");
 
         assert_ok_eq!(
-            ascend_to_root(dir, holds("never-exists")).await,
+            ascend_to_root(dir, holds("never-exists")),
             dir.to_path_buf()
         );
     }

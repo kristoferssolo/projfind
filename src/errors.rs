@@ -1,7 +1,6 @@
 use std::{
     io,
     path::{Path, PathBuf},
-    string::FromUtf8Error,
 };
 use thiserror::Error;
 use tokio::{sync::AcquireError, task::JoinError};
@@ -26,13 +25,6 @@ pub enum ProjectFinderError {
 
     #[error("`{}` produced no stdout to read", .binary.display())]
     MissingStdout { binary: PathBuf },
-
-    #[error("`{}` emitted invalid UTF-8", .binary.display())]
-    Utf8 {
-        binary: PathBuf,
-        #[source]
-        source: FromUtf8Error,
-    },
 
     #[error("Failed to read {}", .path.display())]
     ReadFile {

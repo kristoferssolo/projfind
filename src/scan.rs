@@ -4,7 +4,7 @@ use crate::{
 };
 use regex::escape;
 use std::{
-    collections::HashMap,
+    iter::once,
     path::{Path, PathBuf},
     process::Stdio,
 };
@@ -14,59 +14,41 @@ use tokio::{
 };
 use tracing::{debug, warn};
 
+/// A `.git` directory marks a repository. A `.git` *file* marks a submodule or
+/// a worktree, which belongs to the repository owning it rather than standing
+/// on its own, so only the directory counts.
+const GIT_DIR: &str = ".git";
+
 pub struct DirectoryScan {
     pub git_repos: Vec<PathBuf>,
-    pub marker_files: HashMap<String, Vec<PathBuf>>,
+    pub marker_files: Vec<PathBuf>,
 }
 
+/// Walks `dir` once, collecting Git repositories and marker files together.
+///
+/// Repositories and markers share a single `fd` run because searching for them
+/// separately reads every directory twice over. `--prune` stops the walk at
+/// each `.git`, whose object store dwarfs the tree around it.
 pub async fn scan_directory(
     deps: &Dependencies,
     dir: &Path,
     marker_names: &[String],
     max_depth: usize,
 ) -> Result<DirectoryScan> {
-    let (git_repos, marker_files) = tokio::try_join!(
-        find_git_repos(deps, dir, max_depth),
-        find_marker_files(deps, dir, marker_names, max_depth),
-    )?;
-
-    Ok(DirectoryScan {
-        git_repos,
-        marker_files,
-    })
-}
-
-async fn find_marker_files(
-    deps: &Dependencies,
-    dir: &Path,
-    marker_names: &[String],
-    max_depth: usize,
-) -> Result<HashMap<String, Vec<PathBuf>>> {
-    if marker_names.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let combined_patterns = format!(
-        "({})",
-        marker_names
-            .iter()
-            .map(|pattern| escape(pattern))
-            .collect::<Vec<_>>()
-            .join("|")
-    );
-
     let mut cmd = Command::new(&deps.fd_path);
     cmd.arg("--hidden")
-        .arg("--no-ignore-vcs")
+        .arg("--prune")
+        .arg("--type")
+        .arg("d")
         .arg("--type")
         .arg("f")
         .arg("--max-depth")
         .arg(max_depth.to_string())
-        .arg(&combined_patterns)
+        .arg(search_pattern(marker_names))
         .arg(dir)
         .stdout(Stdio::piped());
 
-    debug!("Finding marker files in {}", dir.display());
+    debug!("Scanning {}", dir.display());
 
     let mut child = cmd
         .spawn()
@@ -78,22 +60,17 @@ async fn find_marker_files(
             binary: deps.fd_path.clone(),
         })?;
     let mut lines = BufReader::new(stdout).lines();
-    let mut results = marker_names
-        .iter()
-        .map(|name| (name.clone(), Vec::new()))
-        .collect::<HashMap<_, _>>();
+    let mut scan = DirectoryScan {
+        git_repos: Vec::new(),
+        marker_files: Vec::new(),
+    };
 
     while let Some(line) = lines
         .next_line()
         .await
         .map_err(|error| ProjectFinderError::command(&deps.fd_path, error))?
     {
-        let path = PathBuf::from(line);
-        if let Some(file_name) = path.file_name().and_then(|name| name.to_str())
-            && let Some(entries) = results.get_mut(file_name)
-        {
-            entries.push(path);
-        }
+        scan.classify(PathBuf::from(line));
     }
 
     let status = child
@@ -101,44 +78,52 @@ async fn find_marker_files(
         .await
         .map_err(|error| ProjectFinderError::command(&deps.fd_path, error))?;
     if !status.success() {
-        warn!("fd marker search exited with {status}");
+        warn!("fd search exited with {status}");
     }
 
-    Ok(results)
+    Ok(scan)
 }
 
-async fn find_git_repos(deps: &Dependencies, dir: &Path, max_depth: usize) -> Result<Vec<PathBuf>> {
-    let mut cmd = Command::new(&deps.fd_path);
-    cmd.arg("--hidden")
-        .arg("--type")
-        .arg("d")
-        .arg("--max-depth")
-        .arg(max_depth.to_string())
-        .arg("^.git$")
-        .arg(dir)
-        .stdout(Stdio::piped());
+/// Anchored so `fd` rejects near misses such as `package.json.bak` itself,
+/// rather than streaming them over for us to discard.
+fn search_pattern(marker_names: &[String]) -> String {
+    let alternatives = once(escape(GIT_DIR))
+        .chain(marker_names.iter().map(|name| escape(name)))
+        .collect::<Vec<_>>()
+        .join("|");
 
-    debug!("Finding Git repositories in {}", dir.display());
+    format!("^({alternatives})$")
+}
 
-    let output = cmd
-        .output()
-        .await
-        .map_err(|error| ProjectFinderError::command(&deps.fd_path, error))?;
-    if !output.status.success() {
-        warn!(
-            "fd Git search failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return Ok(Vec::new());
+impl DirectoryScan {
+    fn classify(&mut self, path: PathBuf) {
+        if path.file_name().is_some_and(|name| name == GIT_DIR) {
+            if path.is_dir()
+                && let Some(parent) = path.parent()
+            {
+                self.git_repos.push(parent.to_path_buf());
+            }
+            return;
+        }
+
+        self.marker_files.push(path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pattern_always_looks_for_repositories() {
+        assert_eq!(search_pattern(&[]), r"^(\.git)$");
     }
 
-    let stdout = String::from_utf8(output.stdout).map_err(|source| ProjectFinderError::Utf8 {
-        binary: deps.fd_path.clone(),
-        source,
-    })?;
-
-    Ok(stdout
-        .lines()
-        .filter_map(|line| Path::new(line).parent().map(Path::to_path_buf))
-        .collect())
+    #[test]
+    fn marker_names_are_escaped_into_the_alternation() {
+        assert_eq!(
+            search_pattern(&["Cargo.toml".to_owned(), "go.mod".to_owned()]),
+            r"^(\.git|Cargo\.toml|go\.mod)$"
+        );
+    }
 }

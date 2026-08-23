@@ -29,7 +29,6 @@ regex = "1.13"
 serde = {version = "1", features = [ "derive" ]}
 thiserror = "2.0"
 tokio = {version = "1.53", features = [
-  "fs",
   "io-util",
   "macros",
   "process",

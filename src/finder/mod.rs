@@ -5,37 +5,37 @@ use crate::{
     config::Config,
     dependencies::Dependencies,
     errors::{ProjectFinderError, Result},
-    scan::scan_directory,
+    scan::{DirectoryScan, scan_directory},
 };
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::{
-    spawn,
-    sync::{RwLock, Semaphore},
-};
+use tokio::{spawn, sync::Semaphore};
 use tracing::{debug, info};
-
-type ProjectSet = Arc<RwLock<HashSet<PathBuf>>>;
 
 const MAX_CONCURRENT_SEARCHES: usize = 8;
 
-fn is_covered_by(candidate: &Path, known: &Path) -> bool {
-    if candidate == known {
-        return true;
-    }
-
-    let is_direct_child = candidate.parent().is_some_and(|parent| parent == known);
-    candidate.starts_with(known) && !is_direct_child
+/// A candidate is redundant when `known` already holds it or holds one of its
+/// ancestors, except for the immediate parent: a direct child of a project is
+/// still a project of its own.
+///
+/// Ancestors are looked up rather than compared against every known project,
+/// which keeps a monorepo's thousands of markers from turning this into a
+/// quadratic scan.
+fn is_covered(candidate: &Path, known: &HashSet<PathBuf>) -> bool {
+    known.contains(candidate)
+        || candidate
+            .ancestors()
+            .skip(2)
+            .any(|ancestor| known.contains(ancestor))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProjectFinder {
     config: Config,
     deps: Dependencies,
-    discovered_projects: ProjectSet,
     root_resolver: RootResolver,
 }
 
@@ -46,12 +46,46 @@ impl ProjectFinder {
         Self {
             config,
             deps,
-            discovered_projects: Arc::default(),
             root_resolver,
         }
     }
 
     pub async fn find_projects(&self) -> Result<Vec<PathBuf>> {
+        let scans = self.scan_all().await?;
+
+        let mut projects = scans
+            .iter()
+            .flat_map(|scan| scan.git_repos.iter().cloned())
+            .collect::<HashSet<_>>();
+
+        // Shallowest first, so an outer project always gets the chance to
+        // absorb the markers nested underneath it.
+        let mut candidates = self.resolve_marker_roots(&scans)?;
+        candidates.sort_unstable();
+        candidates.dedup();
+
+        for candidate in candidates {
+            if !is_covered(&candidate, &projects) {
+                projects.insert(candidate);
+            }
+        }
+
+        let mut projects = projects.into_iter().collect::<Vec<_>>();
+        projects.sort_unstable();
+
+        if let Some(max) = self.config.max_results {
+            projects.truncate(max.get());
+        }
+
+        Ok(projects)
+    }
+
+    /// Runs one scan per configured search directory, capped at
+    /// [`MAX_CONCURRENT_SEARCHES`] so a long path list cannot swamp the disk.
+    ///
+    /// A directory that fails is dropped with a log line; the search only fails
+    /// outright when every directory does.
+    async fn scan_all(&self) -> Result<Vec<DirectoryScan>> {
         let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_SEARCHES));
         let mut handles = Vec::with_capacity(self.config.paths.len());
 
@@ -64,7 +98,9 @@ impl ProjectFinder {
                 info!("Searching in: {}", path.display());
             }
 
-            let finder = self.clone();
+            let deps = self.deps.clone();
+            let marker_files = self.config.marker_files.clone();
+            let depth = self.config.depth;
             let path = path.clone();
             let semaphore = Arc::clone(&semaphore);
 
@@ -77,15 +113,19 @@ impl ProjectFinder {
                             source,
                         }
                     })?;
-                    finder.process_directory(&path).await
+                    scan_directory(&deps, &path, &marker_files, depth).await
                 }),
             ));
         }
 
+        let mut scans = Vec::with_capacity(handles.len());
         let mut errors = Vec::new();
         for (path, handle) in handles {
             let error = match handle.await {
-                Ok(Ok(())) => continue,
+                Ok(Ok(scan)) => {
+                    scans.push(scan);
+                    continue;
+                }
                 Ok(Err(error)) => error,
                 Err(source) => ProjectFinderError::TaskFailed { path, source },
             };
@@ -99,61 +139,19 @@ impl ProjectFinder {
             return Err(error);
         }
 
-        let mut projects = self
-            .discovered_projects
-            .read()
-            .await
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
-        projects.sort();
-
-        if let Some(max) = self.config.max_results {
-            projects.truncate(max.get());
-        }
-
-        Ok(projects)
+        Ok(scans)
     }
 
-    async fn process_directory(&self, dir: &Path) -> Result<()> {
-        let scan = scan_directory(
-            &self.deps,
-            dir,
-            &self.config.marker_files,
-            self.config.depth,
-        )
-        .await?;
-
-        self.discovered_projects
-            .write()
-            .await
-            .extend(scan.git_repos);
-
-        for (marker_name, paths) in scan.marker_files {
-            for path in paths {
-                if let Some(parent) = path.parent() {
-                    self.process_marker(parent, &marker_name).await?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn process_marker(&self, dir: &Path, marker_name: &str) -> Result<()> {
-        let project_root = self.root_resolver.resolve(dir, marker_name).await?;
-        let already_covered = self
-            .discovered_projects
-            .read()
-            .await
+    fn resolve_marker_roots(&self, scans: &[DirectoryScan]) -> Result<Vec<PathBuf>> {
+        scans
             .iter()
-            .any(|known| is_covered_by(&project_root, known));
-
-        if !already_covered {
-            self.discovered_projects.write().await.insert(project_root);
-        }
-
-        Ok(())
+            .flat_map(|scan| scan.marker_files.iter())
+            .filter_map(|marker| {
+                let dir = marker.parent()?;
+                let name = marker.file_name()?.to_str()?;
+                Some(self.root_resolver.resolve(dir, name))
+            })
+            .collect()
     }
 }
 
@@ -178,8 +176,10 @@ mod tests {
         #[case] expected: bool,
         #[case] reason: &str,
     ) {
+        let known = HashSet::from([PathBuf::from(known)]);
+
         assert_eq!(
-            is_covered_by(Path::new(candidate), Path::new(known)),
+            is_covered(Path::new(candidate), &known),
             expected,
             "{reason}"
         );

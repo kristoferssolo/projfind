@@ -5,6 +5,9 @@ files such as `Cargo.toml`, `package.json`, and `pyproject.toml`. It resolves
 markers to their repository or workspace root and prints a sorted list of
 paths. It scans multiple search directories concurrently.
 
+Ignore rules are respected, so paths excluded by `.gitignore` (or `.ignore`)
+are skipped, and the contents of `.git` are never walked.
+
 ## Install
 
 Project Finder requires [`fd`](https://github.com/sharkdp/fd). Debian and Ubuntu
