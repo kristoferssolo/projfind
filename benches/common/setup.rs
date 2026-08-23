@@ -55,7 +55,6 @@ struct Permissions(#[serde(deserialize_with = "deserialize_u16_from_empty")] u16
 
 pub fn setup_entries() -> anyhow::Result<TempDir> {
     let temp_dir = TempDir::new()?;
-    println!("Temporary directory: {}", temp_dir.path().display());
 
     let fixtures_dir = PathBuf::from(BASE_DIR).join("benches/fixtures");
 
