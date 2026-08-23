@@ -1,3 +1,14 @@
+alias c := check
+alias f := fmt
+alias l := clippy
+alias t := test
+alias d := doc
+alias r := run
+alias b := bench
+alias s := snapshot
+alias o := outdated
+alias u := update
+
 # List the available recipes.
 default:
     @just --list
@@ -19,7 +30,7 @@ clippy:
 
 # Run unit and integration tests. Requires `fd` on PATH.
 test *ARGS:
-    cargo test --locked --workspace --all-features --all-targets {{ ARGS }}
+    cargo nextest run --all-features --all-targets {{ ARGS }}
 
 # Build the documentation, private items included.
 doc *ARGS:
@@ -60,3 +71,6 @@ audit:
 # Remove build artifacts.
 clean:
     cargo clean
+
+setup:
+    cargo install cargo-nextest bacon cargo-audit
