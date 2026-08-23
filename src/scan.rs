@@ -28,7 +28,9 @@ pub struct DirectoryScan {
 ///
 /// Repositories and markers share a single `fd` run because searching for them
 /// separately reads every directory twice over. `--prune` stops the walk at
-/// each `.git`, whose object store dwarfs the tree around it.
+/// each `.git`, whose object store dwarfs the tree around it, and `--follow`
+/// descends into symlinked directories, which `fd` otherwise skips unless the
+/// symlink is the search root itself.
 pub async fn scan_directory(
     deps: &Dependencies,
     dir: &Path,
@@ -37,6 +39,7 @@ pub async fn scan_directory(
 ) -> Result<DirectoryScan> {
     let mut cmd = Command::new(&deps.fd_path);
     cmd.arg("--hidden")
+        .arg("--follow")
         .arg("--prune")
         .arg("--type")
         .arg("d")
