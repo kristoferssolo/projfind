@@ -1,13 +1,10 @@
+alias b := bench
 alias c := check
 alias f := fmt
-alias l := clippy
-alias t := test
-alias d := doc
+alias i := install
 alias r := run
-alias b := bench
 alias s := snapshot
-alias o := outdated
-alias u := update
+alias t := test
 
 # List the available recipes.
 default:

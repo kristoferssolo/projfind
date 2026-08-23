@@ -226,16 +226,16 @@ impl ProjectFinder {
 
     /// Process a single directory by scanning for git repositories and marker files.
     async fn process_directory(&self, dir: &Path) -> Result<()> {
-        // Look for git repositories first.
-        let git_repos = find_git_repos(&self.deps, dir, self.config.depth).await?;
+        let (git_repos, marker_map) = tokio::try_join!(
+            find_git_repos(&self.deps, dir, self.config.depth),
+            find_files(&self.deps, dir, &MARKER_FILES, self.config.depth),
+        )?;
 
         {
             let mut projects = self.discovered_projects.write().await;
             projects.extend(git_repos);
         }
 
-        // Look for marker files.
-        let marker_map = find_files(&self.deps, dir, &MARKER_FILES, self.config.depth).await?;
         for (pattern, paths) in marker_map {
             for path in paths {
                 if let Some(parent_dir) = path.parent() {
