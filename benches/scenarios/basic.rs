@@ -1,41 +1,39 @@
 use crate::common::{
-    default,
-    setup::{BenchParams, TEMP_DIR, init_temp_dir},
+    setup::{BenchParams, init_temp_dir},
     utils::run_binary_with_args,
 };
 use criterion::{BenchmarkId, Criterion};
 
 pub fn benchmark_basic(c: &mut Criterion) {
-    init_temp_dir();
-    let temp_dir = TEMP_DIR.get().unwrap().path();
+    let temp_dir = init_temp_dir().path();
 
-    let params = vec![
+    let params = [
         BenchParams {
             depth: Some(1),
             ..Default::default()
         },
         BenchParams {
             depth: Some(5),
-            ..default()
+            ..Default::default()
         },
         BenchParams {
             depth: Some(10),
-            ..default()
+            ..Default::default()
         },
         BenchParams {
             depth: Some(10),
             max_results: Some(10),
-            ..default()
+            ..Default::default()
         },
     ];
 
     let mut group = c.benchmark_group("basic_scenarios");
 
     for (idx, param) in params.iter().enumerate() {
-        let id = BenchmarkId::new(format!("with_param_{idx}"), &param);
+        let id = BenchmarkId::new(format!("with_param_{idx}"), param);
 
-        group.bench_with_input(id, &param, |b, param| {
-            b.iter(|| run_binary_with_args(temp_dir, param).expect("Failed to run binary"))
+        group.bench_with_input(id, param, |b, param| {
+            b.iter(|| run_binary_with_args(temp_dir, param).expect("Failed to run binary"));
         });
     }
 

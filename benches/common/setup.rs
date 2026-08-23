@@ -14,8 +14,9 @@ use tempfile::TempDir;
 
 pub static TEMP_DIR: OnceLock<TempDir> = OnceLock::new();
 
-pub fn init_temp_dir() {
-    TEMP_DIR.get_or_init(|| setup_entries().expect("Failed to setup test directory"));
+/// Build the shared fixture tree on first call and return it.
+pub fn init_temp_dir() -> &'static TempDir {
+    TEMP_DIR.get_or_init(|| setup_entries().expect("Failed to setup test directory"))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -54,7 +55,7 @@ struct Permissions(#[serde(deserialize_with = "deserialize_u16_from_empty")] u16
 
 pub fn setup_entries() -> anyhow::Result<TempDir> {
     let temp_dir = TempDir::new()?;
-    println!("Temporary directory: {:?}", temp_dir.path());
+    println!("Temporary directory: {}", temp_dir.path().display());
 
     let fixtures_dir = PathBuf::from(BASE_DIR).join("benches/fixtures");
 
@@ -66,10 +67,10 @@ pub fn setup_entries() -> anyhow::Result<TempDir> {
         .for_each(|entry| match entry {
             Ok(entry) => {
                 if let Err(e) = entry.to_tempfile(temp_dir.path()) {
-                    eprintln!("Error processing entry: {}", e);
+                    eprintln!("Error processing entry: {e}");
                 }
             }
-            Err(e) => eprintln!("Failed to deserialize entry: {}", e),
+            Err(e) => eprintln!("Failed to deserialize entry: {e}"),
         });
 
     Ok(temp_dir)
@@ -82,15 +83,16 @@ fn last_snaphow_file(dir: &Path) -> anyhow::Result<PathBuf> {
             entry.ok().and_then(|entry| {
                 let file_name = entry.file_name();
 
-                if let Some(caps) = re.captures(&file_name.to_string_lossy()) {
-                    let [y, m, d, h, min, s] = (1..=6)
-                        .filter_map(|i| caps.get(i)?.as_str().parse().ok())
-                        .collect::<Vec<u32>>()
-                        .try_into()
-                        .ok()?;
-                    return Some(((y, m, d, h, min, s), entry.path()));
-                }
-                None
+                let file_name = file_name.to_string_lossy();
+                let caps = re.captures(&file_name)?;
+                // Year, month, day, hour, minute, second: comparing them in
+                // that order sorts snapshots chronologically.
+                let timestamp: [u32; 6] = (1..=6)
+                    .filter_map(|group| caps.get(group)?.as_str().parse().ok())
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .ok()?;
+                Some((timestamp, entry.path()))
             })
         })
         .collect::<Vec<_>>();
@@ -147,7 +149,7 @@ impl FromStr for EntryType {
             "dir" => Ok(Self::Dir),
             "file" => Ok(Self::File),
             "symlink" => Ok(Self::Symlink),
-            other if other.is_empty() => Err("Empty entry type".to_string()),
+            "" => Err("Empty entry type".to_string()),
             other => Ok(Self::Other(other.into())),
         }
     }
@@ -169,8 +171,9 @@ impl FileEntry {
         match self.entry_type {
             EntryType::Dir => create_dir(&full_path),
             EntryType::File => create_file(&full_path),
-            EntryType::Symlink => Ok(()),
-            EntryType::Other(_) => Ok(()),
+            // Snapshots record symlinks and other node types, but recreating
+            // them adds nothing to what the benchmark measures.
+            EntryType::Symlink | EntryType::Other(_) => Ok(()),
         }
     }
 }

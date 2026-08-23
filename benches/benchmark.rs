@@ -1,3 +1,9 @@
+//! Benchmarks driving the release binary over a tree rebuilt from a snapshot.
+//!
+//! A benchmark that cannot build its fixture has nothing to measure, so setup
+//! failures panic rather than being threaded through as errors.
+#![allow(clippy::expect_used)]
+
 mod common;
 mod scenarios;
 
