@@ -8,6 +8,7 @@ verbose = false
 # Results are unlimited when max_results is omitted.
 # max_results = 100
 
+# Filenames that identify directories worth reporting as projects.
 marker_files = [
   "package.json",
   "pnpm-workspace.yaml",
@@ -22,8 +23,44 @@ marker_files = [
   "deno.json",
   "deno.jsonc",
   "bunfig.toml",
+
+  # Ruby / PHP
+  "Gemfile",
+  "composer.json",
+
+  # JVM
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+  "settings.gradle",
+  "settings.gradle.kts",
+
+  # .NET
+  "global.json",
+
+  # Elixir / Erlang
+  "mix.exs",
+  "rebar.config",
+
+  # Haskell / OCaml
+  "cabal.project",
+  "dune-project",
+
+  # Zig / Swift / Dart / Lua
+  "build.zig",
+  "Package.swift",
+  "pubspec.yaml",
+  "rockspec",
+
+  # Nix / Bazel
+  "flake.nix",
+  "default.nix",
+  "WORKSPACE",
+  "WORKSPACE.bazel",
+  "MODULE.bazel",
 ]
 
+# Files that make JavaScript and Deno manifests resolve to a shared workspace root.
 workspace_files = [
   "pnpm-workspace.yaml",
   "lerna.json",
