@@ -57,12 +57,3 @@ own directory when none exists.
 
 Direct children of a project remain separate results; deeper descendants are
 folded into their ancestor.
-
-## Development
-
-```bash
-just check
-just test
-just run --depth 3 ~/src
-just bench
-```

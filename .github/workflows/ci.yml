@@ -23,17 +23,16 @@ jobs:
         uses: actions/checkout@v7
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      - name: Install dependencies
+      - name: Install fd
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends fd-find
-          cargo install cargo-nextest --locked
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
       - name: Populate target directory from cache
-        uses: Leafwing-Studios/cargo-cache@v2
-        with:
-          sweep-cache: true
+        uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo nextest run --locked --workspace --all-features --release
+        run: cargo nextest run --locked --workspace --all-features
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -46,9 +45,7 @@ jobs:
         with:
           components: clippy
       - name: Populate target directory from cache
-        uses: Leafwing-Studios/cargo-cache@v2
-        with:
-          sweep-cache: true
+        uses: Swatinem/rust-cache@v2
       - name: Run clippy lints
         run: cargo clippy --locked --workspace --all-features --all-targets -- --deny warnings
   audit:
@@ -83,8 +80,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Populate target directory from cache
-        uses: Leafwing-Studios/cargo-cache@v2
-        with:
-          sweep-cache: true
+        uses: Swatinem/rust-cache@v2
       - name: Check documentation
         run: cargo doc --locked --workspace --all-features --document-private-items --no-deps
