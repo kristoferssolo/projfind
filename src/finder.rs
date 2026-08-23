@@ -5,7 +5,6 @@ use crate::{
     errors::{ProjectFinderError, Result},
     marker::{MARKER_FILES, MarkerType},
 };
-use futures::future::join_all;
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -21,6 +20,10 @@ use tracing::{debug, info};
 type ProjectSet = Arc<RwLock<HashSet<PathBuf>>>;
 type WorkspaceCache = Arc<RwLock<HashMap<PathBuf, bool>>>;
 type RootCache = Arc<RwLock<HashMap<(PathBuf, MarkerType), PathBuf>>>;
+
+/// Upper bound on directories searched at once, so a long path list cannot
+/// spawn an unbounded number of `fd` processes.
+const MAX_CONCURRENT_SEARCHES: usize = 8;
 
 /// A `Cargo.toml` declaring a workspace.
 const CARGO_WORKSPACE: ContentTest = ContentTest::LineStartsWith("[workspace]");
@@ -84,8 +87,8 @@ impl ProjectFinder {
 
     /// Find projects in the configured paths.
     pub async fn find_projects(&self) -> Result<Vec<PathBuf>> {
-        let semaphore = Arc::new(Semaphore::new(8)); // Limit to 8 concurrent tasks
-        let mut handles = Vec::new();
+        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_SEARCHES));
+        let mut handles = Vec::with_capacity(self.config.paths.len());
 
         for path in &self.config.paths {
             if !path.is_dir() {
@@ -96,42 +99,42 @@ impl ProjectFinder {
                 info!("Searching in: {}", path.display());
             }
 
-            let finder_clone = self.clone();
-            let path_clone = path.clone();
-            let semaphore_clone = Arc::clone(&semaphore);
+            let finder = self.clone();
+            let path = path.clone();
+            let semaphore = Arc::clone(&semaphore);
 
-            let handle = spawn(async move {
-                let _permit = semaphore_clone.acquire().await.map_err(|e| {
-                    ProjectFinderError::CommandExecutionFailed(format!(
-                        "Failed to aquire semaphore: {e}"
-                    ))
-                })?;
-                finder_clone.process_directory(&path_clone).await
-            });
-            handles.push(handle);
+            handles.push((
+                path.clone(),
+                spawn(async move {
+                    let _permit = semaphore.acquire().await.map_err(|source| {
+                        ProjectFinderError::Scheduling {
+                            path: path.clone(),
+                            source,
+                        }
+                    })?;
+                    finder.process_directory(&path).await
+                }),
+            ));
         }
 
-        // Await all tasks and collect errors.
-        let handle_results = join_all(handles).await;
-        let mut errors = handle_results
-            .into_iter()
-            .filter_map(|handle_result| match handle_result {
-                Ok(task_result) => task_result.err().map(|e| {
-                    debug!("Task failed: {e}");
-                    e
-                }),
-                Err(e) => {
-                    debug!("Task join error: {e}");
-                    Some(ProjectFinderError::CommandExecutionFailed(format!(
-                        "Task panicked: {e}",
-                    )))
-                }
-            })
-            .collect::<Vec<_>>();
+        // Await every task, keeping the errors so a total failure can be reported.
+        let mut errors = Vec::new();
+        for (path, handle) in handles {
+            let error = match handle.await {
+                Ok(Ok(())) => continue,
+                Ok(Err(e)) => e,
+                Err(source) => ProjectFinderError::TaskFailed { path, source },
+            };
+            debug!("Search task failed: {error}");
+            errors.push(error);
+        }
 
-        // If all tasks failed, return one of the errors.
-        if !errors.is_empty() && errors.len() == self.config.paths.len() {
-            return Err(errors.remove(0));
+        // A partial failure still reports what the surviving paths found; only a
+        // total failure is fatal.
+        if errors.len() == self.config.paths.len()
+            && let Some(error) = errors.into_iter().next()
+        {
+            return Err(error);
         }
 
         // Gather discovered projects, sort and apply max_results limit, if set.

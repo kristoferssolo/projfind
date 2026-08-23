@@ -5,7 +5,6 @@ use crate::{
 use regex::escape;
 use std::{
     collections::HashMap,
-    fmt::Display,
     io::ErrorKind,
     path::{Path, PathBuf},
     process::Stdio,
@@ -16,11 +15,6 @@ use tokio::{
     process::Command,
 };
 use tracing::{debug, warn};
-
-/// Helper to wrap command errors in a uniform way.
-fn wrap_command_error<E: Display>(action: &str, err: E) -> ProjectFinderError {
-    ProjectFinderError::CommandExecutionFailed(format!("{action}: {err}"))
-}
 
 /// Run the `fd` command to find files matching one or more literal patterns.
 ///
@@ -68,14 +62,17 @@ pub async fn find_files(
 
     debug!("Running: fd with combined pattern in {}", dir.display());
 
-    let mut child = cmd.spawn().map_err(|e| {
-        ProjectFinderError::CommandExecutionFailed(format!("Failed to spawn fd: {e}"))
-    })?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| ProjectFinderError::command(&deps.fd_path, e))?;
 
     // Capture stdout and wrap it with a buffered reader.
-    let stdout = child.stdout.take().ok_or_else(|| {
-        ProjectFinderError::CommandExecutionFailed("Failed to capture stdout".into())
-    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| ProjectFinderError::MissingStdout {
+            binary: deps.fd_path.clone(),
+        })?;
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
 
@@ -89,7 +86,7 @@ pub async fn find_files(
     while let Some(line) = lines
         .next_line()
         .await
-        .map_err(|e| wrap_command_error("Failed to read stdout", e))?
+        .map_err(|e| ProjectFinderError::command(&deps.fd_path, e))?
     {
         let path = PathBuf::from(line);
         // For each found file, only add it if its file name exactly matches one
@@ -105,7 +102,7 @@ pub async fn find_files(
     let status = child
         .wait()
         .await
-        .map_err(|e| wrap_command_error("Failed to wait process", e))?;
+        .map_err(|e| ProjectFinderError::command(&deps.fd_path, e))?;
     if !status.success() {
         warn!("fd command exited with non-zero status: {status}");
     }
@@ -147,7 +144,7 @@ pub async fn find_git_repos(
     let output = cmd
         .output()
         .await
-        .map_err(|e| wrap_command_error("Failed to find git repositories", e))?;
+        .map_err(|e| ProjectFinderError::command(&deps.fd_path, e))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -155,7 +152,10 @@ pub async fn find_git_repos(
         return Ok(Vec::new());
     }
 
-    let stdout = String::from_utf8(output.stdout).map_err(ProjectFinderError::Utf8Error)?;
+    let stdout = String::from_utf8(output.stdout).map_err(|e| ProjectFinderError::Utf8 {
+        binary: deps.fd_path.clone(),
+        source: e,
+    })?;
 
     // For each found '.git' directory, return its parent directory.
     let paths = stdout
@@ -205,10 +205,7 @@ pub async fn file_matches(file: &Path, test: ContentTest) -> Result<bool> {
     match read_to_string(file).await {
         Ok(contents) => Ok(test.matches(&contents)),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(ProjectFinderError::CommandExecutionFailed(format!(
-            "Failed to read file {}: {e}",
-            file.display()
-        ))),
+        Err(e) => Err(ProjectFinderError::read_file(file, e)),
     }
 }
 

@@ -39,11 +39,9 @@ impl Dependencies {
                 info!("Found {binary} at: {}", path.display());
                 Some(Self::new(path))
             })
-            .ok_or_else(|| {
-                ProjectFinderError::DependencyNotFound(
-                    "Neither 'fd' nor 'fdfind' was found. Please install fd from https://github.com/sharkdp/fd"
-                        .into(),
-                )
+            .ok_or(ProjectFinderError::DependencyNotFound {
+                name: "fd (or fdfind)",
+                url: "https://github.com/sharkdp/fd",
             })
     }
 }
