@@ -31,6 +31,9 @@ project-finder [OPTIONS] [PATHS]...
 - `PATHS` replaces the configured search directories. The built-in path is the
   current directory.
 
+Printed paths under your home directory are shortened to `~/...`; paths
+elsewhere stay absolute.
+
 ```bash
 # Search the current directory.
 project-finder
@@ -116,10 +119,3 @@ just bench # Build in release mode and benchmark against a fixture.
 
 Benchmarks replay a directory tree captured in `benches/fixtures`. Capture one
 with `just snapshot <DIRECTORY>...`.
-
-## License
-
-Licensed under either of these terms at your option:
-
-- [MIT](LICENSE-MIT)
-- [Apache 2.0](LICENSE-APACHE)

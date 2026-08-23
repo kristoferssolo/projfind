@@ -4,7 +4,11 @@ mod errors;
 mod finder;
 mod scan;
 
-use crate::{config::Config, dependencies::Dependencies, finder::ProjectFinder};
+use crate::{
+    config::{Config, contract_tilde, home},
+    dependencies::Dependencies,
+    finder::ProjectFinder,
+};
 use color_eyre::{
     config::HookBuilder,
     eyre::{Result, WrapErr},
@@ -28,8 +32,9 @@ async fn main() -> Result<()> {
         .await
         .wrap_err("Failed to find projects")?;
 
+    let home = home();
     for project in projects {
-        println!("{}", project.display());
+        println!("{}", contract_tilde(&project, home.as_deref()).display());
     }
 
     Ok(())

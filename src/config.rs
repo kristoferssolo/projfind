@@ -97,6 +97,21 @@ fn expand_tilde(path: &Path, home: Option<&Path>) -> PathBuf {
     home.join(rest)
 }
 
+/// The inverse of [`expand_tilde`], for printing: shortens a path under `home`
+/// back to `~/...`. Paths elsewhere are returned unchanged, so the output stays
+/// a valid path either way.
+pub fn contract_tilde(path: &Path, home: Option<&Path>) -> PathBuf {
+    let Some(rest) = home.and_then(|home| path.strip_prefix(home).ok()) else {
+        return path.to_path_buf();
+    };
+
+    if rest.as_os_str().is_empty() {
+        return PathBuf::from("~");
+    }
+
+    Path::new("~").join(rest)
+}
+
 impl FileConfig {
     fn apply_to(self, config: &mut Config) {
         if let Some(search_dirs) = self.search_dirs {
@@ -151,7 +166,7 @@ fn read_config_file(path: &Path) -> Result<Option<FileConfig>> {
     Ok(Some(config))
 }
 
-fn home() -> Option<PathBuf> {
+pub fn home() -> Option<PathBuf> {
     env::var_os("HOME")
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)
@@ -310,6 +325,36 @@ max_results = 20
             PathBuf::from(expected),
             "{reason}"
         );
+    }
+
+    #[rstest]
+    #[case("/home/user/repos", "~/repos", "a path under home is shortened")]
+    #[case("/home/user", "~", "home itself is a bare tilde")]
+    #[case("/mnt/data/repos", "/mnt/data/repos", "paths elsewhere are untouched")]
+    #[case(
+        "/home/username/repos",
+        "/home/username/repos",
+        "a longer sibling name is not a prefix match"
+    )]
+    fn tilde_contraction(#[case] input: &str, #[case] expected: &str, #[case] reason: &str) {
+        let home = PathBuf::from("/home/user");
+
+        assert_eq!(
+            contract_tilde(Path::new(input), Some(&home)),
+            PathBuf::from(expected),
+            "{reason}"
+        );
+    }
+
+    #[rstest]
+    #[case("~/repos")]
+    #[case("~")]
+    #[case("/mnt/data")]
+    fn contraction_undoes_expansion(#[case] path: &str) {
+        let home = PathBuf::from("/home/user");
+        let expanded = expand_tilde(Path::new(path), Some(&home));
+
+        assert_eq!(contract_tilde(&expanded, Some(&home)), PathBuf::from(path));
     }
 
     #[test]
