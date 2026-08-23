@@ -10,31 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const DEFAULT_MARKER_FILES: [&str; 13] = [
-    "package.json",
-    "pnpm-workspace.yaml",
-    "lerna.json",
-    "Cargo.toml",
-    "go.mod",
-    "pyproject.toml",
-    "CMakeLists.txt",
-    "Makefile",
-    "justfile",
-    "Justfile",
-    "deno.json",
-    "deno.jsonc",
-    "bunfig.toml",
-];
-
-const DEFAULT_WORKSPACE_FILES: [&str; 5] = [
-    "pnpm-workspace.yaml",
-    "lerna.json",
-    "yarn.lock",
-    ".yarnrc.yml",
-    "workspace.json",
-];
-
-const DEFAULT_DEPTH: usize = 5;
+const DEFAULT_CONFIG: &str = include_str!("../config/config.toml");
 
 #[derive(Debug, Parser, Clone)]
 #[command(
@@ -59,7 +35,7 @@ struct Cli {
     max_results: Option<NonZeroUsize>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileConfig {
     search_dirs: Option<Vec<PathBuf>>,
@@ -70,27 +46,17 @@ struct FileConfig {
     max_results: Option<NonZeroUsize>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(rename = "search_dirs")]
     pub paths: Vec<PathBuf>,
     pub marker_files: Vec<String>,
     pub workspace_files: Vec<String>,
     pub depth: usize,
     pub verbose: bool,
+    #[serde(default)]
     pub max_results: Option<NonZeroUsize>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            paths: vec![PathBuf::from(".")],
-            marker_files: DEFAULT_MARKER_FILES.map(str::to_owned).into(),
-            workspace_files: DEFAULT_WORKSPACE_FILES.map(str::to_owned).into(),
-            depth: DEFAULT_DEPTH,
-            verbose: false,
-            max_results: None,
-        }
-    }
 }
 
 impl Config {
@@ -99,7 +65,8 @@ impl Config {
     }
 
     fn from_sources(cli: Cli, path: Option<&Path>) -> Result<Self> {
-        let mut config = Self::default();
+        let mut config = toml::from_str(DEFAULT_CONFIG)
+            .map_err(|source| ProjectFinderError::ParseDefaultConfig { source })?;
 
         if let Some(path) = path
             && let Some(file) = read_config_file(path)?
@@ -199,7 +166,7 @@ mod tests {
         let config = Config::from_sources(cli, None)?;
 
         assert_eq!(config.paths, [PathBuf::from(".")]);
-        assert_eq!(config.depth, DEFAULT_DEPTH);
+        assert_eq!(config.depth, 5);
         assert!(config.marker_files.iter().any(|file| file == "Cargo.toml"));
         assert!(
             config

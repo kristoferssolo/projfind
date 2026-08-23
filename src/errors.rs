@@ -48,6 +48,12 @@ pub enum ProjectFinderError {
         source: toml::de::Error,
     },
 
+    #[error("Failed to parse the built-in configuration")]
+    ParseDefaultConfig {
+        #[source]
+        source: toml::de::Error,
+    },
+
     #[error("Failed to schedule the search of {}", .path.display())]
     Scheduling {
         path: PathBuf,

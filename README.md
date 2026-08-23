@@ -74,9 +74,10 @@ project-finder --max-results 10
 
 ## Configuration
 
-Project Finder reads an optional TOML file from
-`$XDG_CONFIG_HOME/project-finder/config.toml`. If `XDG_CONFIG_HOME` is unset,
-it checks `$HOME/.config/project-finder/config.toml` instead.
+The binary embeds [`config/config.toml`](config/config.toml) as its default
+configuration at compile time. Project Finder then reads an optional TOML file
+from `$XDG_CONFIG_HOME/project-finder/config.toml`. If `XDG_CONFIG_HOME` is
+unset, it checks `$HOME/.config/project-finder/config.toml` instead.
 
 ```toml
 search_dirs = [ "/home/me/src", "/home/me/work" ]
@@ -102,6 +103,7 @@ Every field is optional. A field in the file replaces its built-in value, so a
 custom `marker_files` list should contain every marker you want to search for.
 Paths and options passed on the command line take precedence over the file.
 Omit `max_results` to return every project.
+See [`config/config.toml`](config/config.toml) for every built-in value.
 
 ## How a project root is chosen
 

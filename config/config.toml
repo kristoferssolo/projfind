@@ -1,0 +1,33 @@
+# The binary embeds these defaults at compile time.
+# Copy this file to $XDG_CONFIG_HOME/project-finder/config.toml to customize it.
+
+search_dirs = [ "." ]
+depth = 5
+verbose = false
+
+# Results are unlimited when max_results is omitted.
+# max_results = 100
+
+marker_files = [
+  "package.json",
+  "pnpm-workspace.yaml",
+  "lerna.json",
+  "Cargo.toml",
+  "go.mod",
+  "pyproject.toml",
+  "CMakeLists.txt",
+  "Makefile",
+  "justfile",
+  "Justfile",
+  "deno.json",
+  "deno.jsonc",
+  "bunfig.toml",
+]
+
+workspace_files = [
+  "pnpm-workspace.yaml",
+  "lerna.json",
+  "yarn.lock",
+  ".yarnrc.yml",
+  "workspace.json",
+]
