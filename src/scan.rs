@@ -31,6 +31,11 @@ pub struct DirectoryScan {
 /// each `.git`, whose object store dwarfs the tree around it, and `--follow`
 /// descends into symlinked directories, which `fd` otherwise skips unless the
 /// symlink is the search root itself.
+///
+/// # Errors
+///
+/// Fails if `fd` cannot be spawned or its output cannot be read. A non-zero
+/// exit from `fd` itself is logged and the partial results are kept.
 pub async fn scan_directory(
     deps: &Dependencies,
     dir: &Path,

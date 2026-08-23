@@ -3,7 +3,6 @@ alias c := check
 alias f := fmt
 alias i := install
 alias r := run
-alias s := snapshot
 alias t := test
 
 # List the available recipes.
@@ -41,17 +40,9 @@ run *ARGS:
 install:
     cargo install --path . --locked
 
-# Benchmark against the newest snapshot in benches/fixtures.
-bench: build-release
-    cargo bench
-
-# Benchmarks shell out to the release binary, so it has to exist first.
-build-release:
-    cargo build --release
-
-# Capture a directory structure as a new benchmark fixture.
-snapshot +PATHS:
-    ./scripts/snapshot -o benches/fixtures/"snapshot-{TIMESTAMP}.csv" -f csv {{ PATHS }}
+# Benchmark. Requires `fd` on PATH, as the discovery group runs a real scan.
+bench *ARGS:
+    cargo bench --bench benchmark -- {{ ARGS }}
 
 # Show what could move, including majors held back by the ranges in Cargo.toml.
 outdated:

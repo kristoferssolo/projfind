@@ -15,7 +15,6 @@ exclude = [
   ".gitignore",
   "tests/",
   "benches/",
-  "scripts/",
   "justfile",
   "*.png",
   "*.md",
@@ -43,8 +42,7 @@ which = "8.0"
 
 [dev-dependencies]
 claims = "0.8"
-criterion = "0.8"
-csv = "1.4"
+criterion = {version = "0.8", features = [ "async_tokio" ]}
 rstest = "0.26"
 tempfile = "3.27"
 

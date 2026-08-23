@@ -62,6 +62,7 @@ pub enum ProjectFinderError {
 }
 
 impl ProjectFinderError {
+    #[must_use]
     pub fn command(binary: &Path, source: io::Error) -> Self {
         Self::Command {
             binary: binary.to_path_buf(),
@@ -69,6 +70,7 @@ impl ProjectFinderError {
         }
     }
 
+    #[must_use]
     pub fn read_file(path: &Path, source: io::Error) -> Self {
         Self::ReadFile {
             path: path.to_path_buf(),

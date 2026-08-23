@@ -38,14 +38,15 @@ const POISONED: &str = "resolver cache lock poisoned";
 /// per-directory workspace verdicts and the final roots are memoised: a
 /// monorepo hands us thousands of markers that share a handful of ancestors.
 #[derive(Debug)]
-pub(super) struct RootResolver {
+pub struct RootResolver {
     workspace_files: Box<[String]>,
     workspace_cache: RwLock<HashMap<PathBuf, bool>>,
     root_cache: RwLock<HashMap<(PathBuf, MarkerType), PathBuf>>,
 }
 
 impl RootResolver {
-    pub(super) fn new(workspace_files: Vec<String>) -> Self {
+    #[must_use]
+    pub fn new(workspace_files: Vec<String>) -> Self {
         Self {
             workspace_files: workspace_files.into(),
             workspace_cache: RwLock::default(),
@@ -53,7 +54,18 @@ impl RootResolver {
         }
     }
 
-    pub(super) fn resolve(&self, dir: &Path, marker_name: &str) -> Result<PathBuf> {
+    /// Returns the project root that the marker `marker_name` in `dir`
+    /// belongs to, which is `dir` itself when nothing above it qualifies.
+    ///
+    /// # Errors
+    ///
+    /// Fails if a candidate manifest exists but cannot be read.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a cache lock is poisoned, which requires a panic while a
+    /// guard is held and so cannot happen here.
+    pub fn resolve(&self, dir: &Path, marker_name: &str) -> Result<PathBuf> {
         let cache_key = (dir.to_path_buf(), MarkerType::from(marker_name));
 
         if let Some(root) = self.root_cache.read().expect(POISONED).get(&cache_key) {

@@ -15,7 +15,7 @@ env:
   RUSTDOCFLAGS: --deny warnings
 jobs:
   # Run tests. Benches are excluded: criterion's `--test` mode would run every
-  # benchmark once per push against the fixtures, for no measurement signal.
+  # benchmark once per push, for no measurement signal.
   test:
     name: Tests
     runs-on: ubuntu-latest

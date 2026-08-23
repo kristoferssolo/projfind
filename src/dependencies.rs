@@ -18,6 +18,11 @@ impl Dependencies {
         }
     }
 
+    /// Locates `fd` on `PATH`, accepting either name it ships under.
+    ///
+    /// # Errors
+    ///
+    /// Fails if neither `fd` nor `fdfind` is installed.
     pub fn check() -> Result<Self> {
         info!("Checking dependencies...");
 

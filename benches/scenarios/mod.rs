@@ -1,3 +1,3 @@
-pub mod basic;
-pub mod edge_cases;
-pub mod specific;
+pub mod dedup;
+pub mod discovery;
+pub mod resolution;

@@ -1,4 +1,4 @@
-mod root;
+pub mod root;
 
 use self::root::RootResolver;
 use crate::{
@@ -9,6 +9,7 @@ use crate::{
 };
 use std::{
     collections::HashSet,
+    hash::BuildHasher,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -24,7 +25,8 @@ const MAX_CONCURRENT_SEARCHES: usize = 8;
 /// Ancestors are looked up rather than compared against every known project,
 /// which keeps a monorepo's thousands of markers from turning this into a
 /// quadratic scan.
-fn is_covered(candidate: &Path, known: &HashSet<PathBuf>) -> bool {
+#[must_use]
+pub fn is_covered<S: BuildHasher>(candidate: &Path, known: &HashSet<PathBuf, S>) -> bool {
     known.contains(candidate)
         || candidate
             .ancestors()
@@ -40,6 +42,7 @@ pub struct ProjectFinder {
 }
 
 impl ProjectFinder {
+    #[must_use]
     pub fn new(config: Config, deps: Dependencies) -> Self {
         let root_resolver = RootResolver::new(config.workspace_files.clone());
 
@@ -50,6 +53,13 @@ impl ProjectFinder {
         }
     }
 
+    /// Searches every configured path and returns the project roots found,
+    /// sorted and free of directories already covered by an outer project.
+    ///
+    /// # Errors
+    ///
+    /// Fails if a configured path is not a directory, or if every search
+    /// fails; a single failing directory is only logged.
     pub async fn find_projects(&self) -> Result<Vec<PathBuf>> {
         let scans = self.scan_all().await?;
 

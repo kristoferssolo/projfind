@@ -60,13 +60,31 @@ pub struct Config {
 }
 
 impl Config {
+    /// Layers the configuration file over the built-in defaults, then the
+    /// command line over both.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the configuration file exists but cannot be read or parsed.
     pub fn load() -> Result<Self> {
         Self::from_sources(Cli::parse(), config_file_path().as_deref())
     }
 
+    /// The configuration compiled into the binary, before any file or command
+    /// line overrides. Search paths are still unexpanded, so a configured `~`
+    /// stays verbatim.
+    ///
+    /// # Errors
+    ///
+    /// Fails only if the embedded `config/config.toml` is not valid TOML, which
+    /// a passing test suite rules out.
+    pub fn defaults() -> Result<Self> {
+        toml::from_str(DEFAULT_CONFIG)
+            .map_err(|source| ProjectFinderError::ParseDefaultConfig { source })
+    }
+
     fn from_sources(cli: Cli, path: Option<&Path>) -> Result<Self> {
-        let mut config = toml::from_str(DEFAULT_CONFIG)
-            .map_err(|source| ProjectFinderError::ParseDefaultConfig { source })?;
+        let mut config = Self::defaults()?;
 
         if let Some(path) = path
             && let Some(file) = read_config_file(path)?
@@ -97,9 +115,10 @@ fn expand_tilde(path: &Path, home: Option<&Path>) -> PathBuf {
     home.join(rest)
 }
 
-/// The inverse of [`expand_tilde`], for printing: shortens a path under `home`
+/// The inverse of tilde expansion, for printing: shortens a path under `home`
 /// back to `~/...`. Paths elsewhere are returned unchanged, so the output stays
 /// a valid path either way.
+#[must_use]
 pub fn contract_tilde(path: &Path, home: Option<&Path>) -> PathBuf {
     let Some(rest) = home.and_then(|home| path.strip_prefix(home).ok()) else {
         return path.to_path_buf();

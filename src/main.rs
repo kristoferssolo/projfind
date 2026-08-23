@@ -1,18 +1,13 @@
-mod config;
-mod dependencies;
-mod errors;
-mod finder;
-mod scan;
-
-use crate::{
-    config::{Config, contract_tilde, home},
-    dependencies::Dependencies,
-    finder::ProjectFinder,
-};
 use color_eyre::{
     config::HookBuilder,
     eyre::{Result, WrapErr},
 };
+use projfind::{
+    config::{Config, contract_tilde, home},
+    dependencies::Dependencies,
+    finder::ProjectFinder,
+};
+use std::io::stderr;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -40,9 +35,14 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Diagnostics go to stderr, so stdout stays a clean list of paths for
+/// whatever the results are piped into.
 fn init_logging(verbose: bool) -> Result<()> {
     let level = if verbose { Level::INFO } else { Level::ERROR };
-    let subscriber = FmtSubscriber::builder().with_max_level(level).finish();
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(level)
+        .with_writer(stderr)
+        .finish();
 
     tracing::subscriber::set_global_default(subscriber)?;
 

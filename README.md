@@ -114,8 +114,11 @@ them.
 just check # Run formatting, Clippy, tests, and docs as CI does.
 just test  # Run tests only.
 just run -d 3 ~/src
-just bench # Build in release mode and benchmark against a fixture.
+just bench # Benchmark; pass criterion arguments through, e.g. `just bench dedup`.
 ```
 
-Benchmarks replay a directory tree captured in `benches/fixtures`. Capture one
-with `just snapshot <DIRECTORY>...`.
+Benchmarks build their trees in code, so a run measures the same shapes on
+every machine. `discovery` times a whole search, `fd` included; the rest
+isolate projfind's own work: `root_resolution` compares a cold cache against a
+warm one, `deep_ascent` times a single resolution against how far it has to
+climb, and `dedup` checks that folding roots into the result set stays linear.
