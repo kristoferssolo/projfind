@@ -1,4 +1,4 @@
-alias b := bench
+alias a := audit
 alias c := check
 alias f := fmt
 alias i := install
