@@ -1,33 +1,14 @@
 # Project Finder
 
-A command-line tool to discover coding projects in specified directories.
-It identifies projects based on common marker files (e.g., `package.json`, `Cargo.toml`, `.git` directories).
+`project-finder` scans directories for Git repositories and common project
+files such as `Cargo.toml`, `package.json`, and `pyproject.toml`. It resolves
+markers to their repository or workspace root and prints a sorted list of
+paths. It scans multiple search directories concurrently.
 
-## Goal
+## Install
 
-The goal of this project is to quickly and efficiently locate coding projects within a directory structure.
-This is particularly useful for developers working in large codebases or managing multiple repositories.
-
-## Features
-
-* **Fast project discovery:** Quickly scans directories to identify potential projects.
-* **Multiple project types:** Recognizes projects based on various marker files for different languages and build systems.
-* **Configurable search depth:** Limits the search depth to improve performance.
-* **Verbose output:** Provides detailed information about the search process.
-* **Workspace Awareness:** Detects and handles workspace configurations correctly, such as Javascript and Rust workspaces.
-* **Concurrency:** Uses asynchronous tasks to process multiple directories in parallel, improving performance.
-
-## Requirements
-
-To use Project Finder, you need the following dependencies installed on your system:
-
-* **fd:** A simple, fast, and user-friendly alternative to `find`.
-  * Installation instructions: [https://github.com/sharkdp/fd#installation](https://github.com/sharkdp/fd#installation)
-
-`fd` must be available in your system's PATH.
-Debian and Ubuntu package it as `fdfind`, which is also recognised.
-
-## Installation
+Project Finder requires [`fd`](https://github.com/sharkdp/fd). Debian and Ubuntu
+package it as `fdfind`, which Project Finder also recognizes.
 
 ```bash
 cargo install project-finder
@@ -35,54 +16,50 @@ cargo install project-finder
 
 ## Usage
 
-```bash
-project-finder [OPTIONS] [PATHS]
+```text
+project-finder [OPTIONS] [PATHS]...
 ```
 
-### Options
-
-* **-d, --depth <DEPTH>**: Maximum search depth (default: 5)
-* **-n, --max-results <MAX_RESULTS>**: Maximum number of results to return (default: unlimited)
-* **-v, --verbose**: Show verbose output
-* **PATHS**: Directories to search for projects (default: ".")
-
-### Examples
-
-* Find projects in the current directory with the default depth:
-
-  ```bash
-  project-finder
-  ```
-
-* Find projects in a specific directory with a maximum depth of 3:
-
-  ```bash
-  project-finder --depth 3 /path/to/search
-  ```
-
-* Find projects in multiple directories with verbose output:
+- `-d, --depth <DEPTH>` sets the maximum search depth. The built-in value is
+  `5`.
+- `-n, --max-results <MAX_RESULTS>` limits the number of printed paths. The
+  built-in value is unlimited.
+- `-v, --verbose` prints search progress.
+- `PATHS` replaces the configured search directories. The built-in path is the
+  current directory.
 
 ```bash
-project-finder --verbose /path/to/search1 /path/to/search2
-```
+# Search the current directory.
+project-finder
 
-* Limit the number of results to 10:
+# Search one directory to a depth of three.
+project-finder --depth 3 ~/src
 
-```bash
+# Search several directories and print progress.
+project-finder --verbose ~/src ~/work
+
+# Print at most ten projects.
 project-finder --max-results 10
 ```
 
 ## Configuration
 
-The binary embeds [`config/config.toml`](config/config.toml) as its default
-configuration at compile time. Project Finder then reads an optional TOML file
-from `$XDG_CONFIG_HOME/project-finder/config.toml`. If `XDG_CONFIG_HOME` is
-unset, it checks `$HOME/.config/project-finder/config.toml` instead.
+The binary embeds [`config/config.toml`](config/config.toml) as its built-in
+configuration. At startup, it checks
+`$XDG_CONFIG_HOME/project-finder/config.toml`, or
+`$HOME/.config/project-finder/config.toml` when `XDG_CONFIG_HOME` is unset.
+
+Every field is optional. A field in the user file replaces the corresponding
+built-in value. Lists are replaced, not extended. Command-line arguments
+override both.
 
 ```toml
 search_dirs = [ "/home/me/src", "/home/me/work" ]
 depth = 5
 verbose = false
+
+# Omit this field for unlimited results.
+# max_results = 100
 
 marker_files = [
   "Cargo.toml",
@@ -99,60 +76,47 @@ workspace_files = [
 ]
 ```
 
-Every field is optional. A field in the file replaces its built-in value, so a
-custom `marker_files` list should contain every marker you want to search for.
-Paths and options passed on the command line take precedence over the file.
-Omit `max_results` to return every project.
-See [`config/config.toml`](config/config.toml) for every built-in value.
+## Project roots
 
-## How a project root is chosen
+The directory containing a marker is not always the project root. Project
+Finder uses these rules to choose the path it prints:
 
-Project Finder reports the directory that owns a marker, not the directory the
-marker sits in. Starting from the marker, it climbs the ancestors and stops at
-the first of:
+- `package.json`, `deno.json`, and `deno.jsonc` climb toward the filesystem root
+  until they reach a JavaScript or Deno workspace, or a Git repository.
+- `Cargo.toml` climbs until it reaches a manifest containing `[workspace]`, or a
+  Git repository.
+- `Makefile`, `CMakeLists.txt`, `justfile`, and `Justfile` resolve to the highest
+  directory containing the same build file, without crossing a repository
+  boundary.
+- Other markers resolve to their enclosing Git repository. Without one, they
+  stay in the marker's directory.
 
-* a workspace root, for `package.json`, `deno.json` and `Cargo.toml` markers.
-  A `pnpm-workspace.yaml`, `lerna.json`, `yarn.lock`, `.yarnrc.yml` or
-  `workspace.json` marks one by existing; `package.json`, `deno.json`,
-  `deno.jsonc`, `bunfig.toml`, `Cargo.toml`, `rush.json`, `nx.json` and
-  `turbo.json` mark one when their contents say so.
-* a directory holding `.git`.
+JavaScript and Deno workspace detection checks the configured
+`workspace_files`. It also reads `package.json`, `deno.json`, `deno.jsonc`,
+`bunfig.toml`, `Cargo.toml`, `rush.json`, `nx.json`, and `turbo.json` for known
+workspace declarations.
 
-Build files (`Makefile`, `CMakeLists.txt`, `justfile`, `Justfile`) instead
-resolve to the highest directory holding the same build file, bounded by the
-enclosing repository. Anything else resolves to the enclosing repository, or to
-the marker's own directory when there is none.
-
-A project nested one level inside another is reported separately, since a crate
-inside a JavaScript monorepo is usually a project in its own right. Anything
-deeper is treated as part of its parent.
-
-## Use Cases
-
-* **Quickly locating projects:** Easily find all projects within a large directory structure.
-* **Managing multiple repositories:** Discover all repositories in a directory.
-* **Automated scripting:** Integrate project discovery into scripts for build automation, testing, or deployment.
-* **Workspace management:** Identify workspace roots for managing multiple related projects.
+Project Finder keeps a direct child of a discovered project as a separate
+result. It treats anything nested more deeply as part of its parent.
 
 ## Development
 
-The [justfile](justfile) wraps the common tasks. `just` on its own lists them.
+The [justfile](justfile) contains the development commands. Run `just` to list
+them.
 
 ```bash
-just check # formatting, clippy, tests and docs, as CI runs them
-just test  # tests only
+just check # Run formatting, Clippy, tests, and docs as CI does.
+just test  # Run tests only.
 just run -d 3 ~/src
-just bench # builds the release binary, then benchmarks against a fixture
+just bench # Build in release mode and benchmark against a fixture.
 ```
 
-Benchmarks replay a directory tree captured in `benches/fixtures`. Capture a
-new one with `just snapshot <DIRECTORY>...`.
+Benchmarks replay a directory tree captured in `benches/fixtures`. Capture one
+with `just snapshot <DIRECTORY>...`.
 
 ## License
 
-This project is dual-licensed under either:
+Licensed under either of these terms at your option:
 
-* MIT License ([LICENSE-MIT](LICENSE-MIT) or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))
-* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))
-
-at your option.
+- [MIT](LICENSE-MIT)
+- [Apache 2.0](LICENSE-APACHE)
