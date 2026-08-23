@@ -12,7 +12,7 @@ use std::{
     sync::Arc,
 };
 use tokio::{
-    fs::metadata,
+    fs::try_exists,
     spawn,
     sync::{RwLock, Semaphore},
 };
@@ -59,9 +59,9 @@ const WORKSPACE_FILES: [&str; 5] = [
     "workspace.json", // Generic workspace file
 ];
 
-/// Check whether a given path exists.
+/// Check whether a given path exists, treating an unreadable path as absent.
 async fn path_exists(path: &Path) -> bool {
-    metadata(path).await.is_ok()
+    try_exists(path).await.unwrap_or(false)
 }
 
 /// `dir`'s ancestors, nearest first.
@@ -72,6 +72,21 @@ fn ancestors_above(dir: &Path) -> impl Iterator<Item = &Path> {
     dir.ancestors()
         .skip(1)
         .take_while(|ancestor| !ancestor.as_os_str().is_empty())
+}
+
+/// Whether `candidate` is already accounted for by `known`.
+///
+/// A direct child is kept: a nested project one level down is usually a real
+/// project of a different kind, such as a Cargo crate inside a JavaScript
+/// monorepo. Anything deeper is treated as part of `known`.
+fn is_covered_by(candidate: &Path, known: &Path) -> bool {
+    if candidate == known {
+        return true;
+    }
+
+    let is_direct_child = candidate.parent().is_some_and(|parent| parent == known);
+
+    candidate.starts_with(known) && !is_direct_child
 }
 
 /// Whether `dir` is the top of a git working tree.
@@ -233,36 +248,19 @@ impl ProjectFinder {
     }
 
     /// Process a marker file found in a directory.
+    /// Record the project that owns a marker file found in `dir`.
     async fn process_marker(&self, dir: &Path, marker_name: &str) -> Result<()> {
         let marker_type = MarkerType::from(marker_name);
-
-        // Find project root
         let project_root = self.find_project_root(dir, &marker_type).await?;
 
-        // Improved nested project detection
-        // Only ignore if it's a subproject of the same type (prevents ignoring
-        // valid nested projects of different types)
-        let mut should_add = true;
-        {
+        let already_covered = {
             let projects = self.discovered_projects.read().await;
-            for known_project in projects.iter() {
-                // Check if this is a direct parent (not just any ancestor)
-                let is_direct_parent = project_root
-                    .parent()
-                    .is_some_and(|parent| parent == known_project);
+            projects
+                .iter()
+                .any(|known| is_covered_by(&project_root, known))
+        };
 
-                // Only exclude if it's a subdirectory and has the same marker type
-                // or if it's exactly the same directory
-                if project_root == *known_project
-                    || project_root.starts_with(known_project) && !is_direct_parent
-                {
-                    should_add = false;
-                    break;
-                }
-            }
-        }
-
-        if should_add {
+        if !already_covered {
             self.discovered_projects.write().await.insert(project_root);
         }
 
@@ -346,6 +344,7 @@ impl ProjectFinder {
 mod tests {
     use super::*;
     use claims::{assert_none, assert_ok_eq, assert_some_eq};
+    use rstest::rstest;
     use std::fs::{create_dir_all, write};
     use tempfile::TempDir;
 
@@ -423,6 +422,29 @@ mod tests {
         assert_eq!(
             ascend_to_highest_build_file(&leaf, "Makefile"),
             temp.path().to_path_buf()
+        );
+    }
+
+    #[rstest]
+    #[case("/repo", "/repo", true, "the same directory is already known")]
+    #[case("/repo/pkg", "/repo", false, "a direct child is a distinct project")]
+    #[case(
+        "/repo/pkg/inner",
+        "/repo",
+        true,
+        "anything deeper belongs to the parent"
+    )]
+    #[case("/other", "/repo", false, "unrelated trees never cover each other")]
+    fn coverage_rules(
+        #[case] candidate: &str,
+        #[case] known: &str,
+        #[case] expected: bool,
+        #[case] reason: &str,
+    ) {
+        assert_eq!(
+            is_covered_by(Path::new(candidate), Path::new(known)),
+            expected,
+            "{reason}"
         );
     }
 

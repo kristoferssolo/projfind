@@ -91,10 +91,10 @@ pub async fn find_files(
         let path = PathBuf::from(line);
         // For each found file, only add it if its file name exactly matches one
         // of the provided patterns.
-        if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
-            if let Some(entries) = results.get_mut(file_name) {
-                entries.push(path);
-            }
+        if let Some(file_name) = path.file_name().and_then(|f| f.to_str())
+            && let Some(entries) = results.get_mut(file_name)
+        {
+            entries.push(path);
         }
     }
 
