@@ -1,26 +1,26 @@
 use clap::Parser;
-use std::path::PathBuf;
+use std::{num::NonZeroUsize, path::PathBuf};
 
 #[derive(Debug, Parser, Clone)]
-#[clap(
+#[command(
     author,
     version,
     about = "Find coding projects in specified directories"
 )]
 pub struct Config {
     /// Directories to search for projects
-    #[clap(default_value = ".")]
+    #[arg(default_value = ".")]
     pub paths: Vec<PathBuf>,
 
     /// Maximum search depth
-    #[clap(short, long, default_value = "5")]
+    #[arg(short, long, default_value_t = 5)]
     pub depth: usize,
 
     /// Show verbose output
-    #[clap(short, long)]
+    #[arg(short, long)]
     pub verbose: bool,
 
-    /// Maximum number of results to return
-    #[clap(short = 'n', long, default_value = "0")]
-    pub max_results: usize,
+    /// Maximum number of results to return [default: unlimited]
+    #[arg(short = 'n', long)]
+    pub max_results: Option<NonZeroUsize>,
 }

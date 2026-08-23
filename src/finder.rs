@@ -217,8 +217,8 @@ impl ProjectFinder {
             .cloned()
             .collect::<Vec<PathBuf>>();
         projects.sort();
-        if self.config.max_results > 0 && projects.len() > self.config.max_results {
-            projects.truncate(self.config.max_results);
+        if let Some(max) = self.config.max_results {
+            projects.truncate(max.get());
         }
 
         Ok(projects)
