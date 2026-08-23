@@ -1,5 +1,5 @@
 # The binary embeds these defaults at compile time.
-# Copy this file to $XDG_CONFIG_HOME/project-finder/config.toml to customize it.
+# Copy this file to $XDG_CONFIG_HOME/projfind/config.toml to customize it.
 
 search_dirs = [ "." ]
 depth = 5

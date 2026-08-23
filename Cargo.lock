@@ -690,7 +690,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "project-finder"
+name = "projfind"
 version = "0.2.0"
 dependencies = [
  "claims",

@@ -6,7 +6,7 @@ use std::{
 };
 use tempfile::TempDir;
 
-const BIN: &str = env!("CARGO_BIN_EXE_project-finder");
+const BIN: &str = env!("CARGO_BIN_EXE_projfind");
 
 fn sample_tree() -> Result<TempDir> {
     let temp = TempDir::new()?;
@@ -117,7 +117,7 @@ fn xdg_config_overrides_built_in_defaults() -> Result<()> {
     )?;
 
     let config_home = temp.path().join("config");
-    let config_dir = config_home.join("project-finder");
+    let config_dir = config_home.join("projfind");
     create_dir_all(&config_dir)?;
     write(
         config_dir.join("config.toml"),

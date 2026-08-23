@@ -1,6 +1,6 @@
-# Project Finder
+# projfind
 
-`project-finder` scans directories for Git repositories and common project
+`projfind` scans directories for Git repositories and common project
 files such as `Cargo.toml`, `package.json`, and `pyproject.toml`. It resolves
 markers to their repository or workspace root and prints a sorted list of
 paths. It scans multiple search directories concurrently.
@@ -10,17 +10,17 @@ are skipped, and the contents of `.git` are never walked.
 
 ## Install
 
-Project Finder requires [`fd`](https://github.com/sharkdp/fd). Debian and Ubuntu
-package it as `fdfind`, which Project Finder also recognizes.
+projfind requires [`fd`](https://github.com/sharkdp/fd). Debian and Ubuntu
+package it as `fdfind`, which projfind also recognizes.
 
 ```bash
-cargo install project-finder
+cargo install projfind
 ```
 
 ## Usage
 
 ```text
-project-finder [OPTIONS] [PATHS]...
+projfind [OPTIONS] [PATHS]...
 ```
 
 - `-d, --depth <DEPTH>` sets the maximum search depth. The built-in value is
@@ -36,24 +36,24 @@ elsewhere stay absolute.
 
 ```bash
 # Search the current directory.
-project-finder
+projfind
 
 # Search one directory to a depth of three.
-project-finder --depth 3 ~/src
+projfind --depth 3 ~/src
 
 # Search several directories and print progress.
-project-finder --verbose ~/src ~/work
+projfind --verbose ~/src ~/work
 
 # Print at most ten projects.
-project-finder --max-results 10
+projfind --max-results 10
 ```
 
 ## Configuration
 
 The binary embeds [`config/config.toml`](config/config.toml) as its built-in
 configuration. At startup, it checks
-`$XDG_CONFIG_HOME/project-finder/config.toml`, or
-`$HOME/.config/project-finder/config.toml` when `XDG_CONFIG_HOME` is unset.
+`$XDG_CONFIG_HOME/projfind/config.toml`, or
+`$HOME/.config/projfind/config.toml` when `XDG_CONFIG_HOME` is unset.
 
 Every field is optional. A field in the user file replaces the corresponding
 built-in value. Lists are replaced, not extended. Command-line arguments
@@ -102,7 +102,7 @@ JavaScript and Deno workspace detection checks the configured
 `bunfig.toml`, `Cargo.toml`, `rush.json`, `nx.json`, and `turbo.json` for known
 workspace declarations.
 
-Project Finder keeps a direct child of a discovered project as a separate
+projfind keeps a direct child of a discovered project as a separate
 result. It treats anything nested more deeply as part of its parent.
 
 ## Development

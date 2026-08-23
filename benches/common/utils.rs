@@ -9,7 +9,7 @@ use super::setup::BenchParams;
 pub const BASE_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 pub fn run_binary_with_args(path: &Path, params: &BenchParams) -> Result<()> {
-    let binary_path = PathBuf::from(BASE_DIR).join("target/release/project-finder");
+    let binary_path = PathBuf::from(BASE_DIR).join("target/release/projfind");
 
     if !binary_path.exists() {
         return Err(eyre!(

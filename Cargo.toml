@@ -1,12 +1,12 @@
 [package]
-name = "project-finder"
+name = "projfind"
 authors = [ "Kristofers Solo <dev@kristofers.xyz>" ]
 version = "0.2.0"
 edition = "2024"
-description = "Fast project finder for developers"
-repository = "https://github.com/kristoferssolo/project-finder"
-documentation = "https://docs.rs/project-finder"
-homepage = "https://github.com/kristoferssolo/project-finder"
+description = "Fast project discovery tool for developers"
+repository = "https://github.com/kristoferssolo/projfind"
+documentation = "https://docs.rs/projfind"
+homepage = "https://github.com/kristoferssolo/projfind"
 license = "MIT OR Apache-2.0"
 keywords = [ "cli", "string", "text", "utility" ]
 categories = [ "command-line-utilities" ]

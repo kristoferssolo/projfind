@@ -189,7 +189,7 @@ fn config_file_path_from(
                 .map(|path| path.join(".config"))
         })?;
 
-    Some(config_home.join("project-finder/config.toml"))
+    Some(config_home.join("projfind/config.toml"))
 }
 
 #[cfg(test)]
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn defaults_are_used_without_a_config_file() -> color_eyre::Result<()> {
-        let cli = Cli::try_parse_from(["project-finder"])?;
+        let cli = Cli::try_parse_from(["projfind"])?;
         let config = Config::from_sources(cli, None)?;
 
         assert_eq!(config.paths, [PathBuf::from(".")]);
@@ -233,7 +233,7 @@ verbose = true
 max_results = 20
 "#,
         )?;
-        let cli = Cli::try_parse_from(["project-finder"])?;
+        let cli = Cli::try_parse_from(["projfind"])?;
 
         let config = Config::from_sources(cli, Some(&path))?;
 
@@ -255,7 +255,7 @@ max_results = 20
             "search_dirs = [\"/from-file\"]\ndepth = 12\nmax_results = 20\n",
         )?;
         let cli = Cli::try_parse_from([
-            "project-finder",
+            "projfind",
             "--depth",
             "3",
             "--max-results",
@@ -274,7 +274,7 @@ max_results = 20
     #[test]
     fn missing_config_file_is_ignored() -> color_eyre::Result<()> {
         let temp = TempDir::new()?;
-        let cli = Cli::try_parse_from(["project-finder"])?;
+        let cli = Cli::try_parse_from(["projfind"])?;
 
         assert_ok!(Config::from_sources(
             cli,
@@ -287,7 +287,7 @@ max_results = 20
     fn xdg_config_home_takes_precedence() {
         let path = config_file_path_from(Some("/xdg".into()), Some("/home/user".into()));
 
-        assert_eq!(path, Some(PathBuf::from("/xdg/project-finder/config.toml")));
+        assert_eq!(path, Some(PathBuf::from("/xdg/projfind/config.toml")));
     }
 
     #[test]
@@ -296,9 +296,7 @@ max_results = 20
 
         assert_eq!(
             path,
-            Some(PathBuf::from(
-                "/home/user/.config/project-finder/config.toml"
-            ))
+            Some(PathBuf::from("/home/user/.config/projfind/config.toml"))
         );
     }
 
@@ -370,7 +368,7 @@ max_results = 20
         let temp = TempDir::new()?;
         let path = temp.path().join("config.toml");
         write(&path, "search_dirs = [\"~/repos\", \"/absolute\"]\n")?;
-        let cli = Cli::try_parse_from(["project-finder"])?;
+        let cli = Cli::try_parse_from(["projfind"])?;
         let home = assert_some!(home());
 
         let config = Config::from_sources(cli, Some(&path))?;

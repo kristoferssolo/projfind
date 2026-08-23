@@ -72,12 +72,12 @@ jobs:
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../project-finder-${{ matrix.target }}.tar.gz project-finder
+          tar czf ../../projfind-${{ matrix.target }}.tar.gz projfind
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: project-finder-${{ matrix.target }}
-          path: target/project-finder-${{ matrix.target }}.*
+          name: projfind-${{ matrix.target }}
+          path: target/projfind-${{ matrix.target }}.*
           compression-level: 0
   create-release:
     needs: [github-release]
@@ -93,5 +93,5 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/project-finder-*
+          files: artifacts/projfind-*
           generate_release_notes: true
