@@ -3,32 +3,21 @@ use std::path::PathBuf;
 use tracing::info;
 use which::which;
 
-/// Binary names `fd` ships under. Debian and Ubuntu rename it to `fdfind`.
+/// Debian and Ubuntu package `fd` as `fdfind`.
 const FD_BINARIES: [&str; 2] = ["fd", "fdfind"];
 
-/// Represents external dependencies required by the application.
 #[derive(Debug, Clone)]
 pub struct Dependencies {
     pub fd_path: PathBuf,
 }
 
 impl Dependencies {
-    /// Creates a new instance of `Dependencies` from the given `fd` binary path.
     pub fn new(fd_path: impl Into<PathBuf>) -> Self {
         Self {
             fd_path: fd_path.into(),
         }
     }
 
-    /// Checks if all required dependencies are available, returning an instance of
-    /// `Dependencies` with the paths set appropriately.
-    ///
-    /// At the moment, this only verifies that the `fd` binary is available.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProjectFinderError::DependencyNotFound`] if neither `fd` nor
-    /// `fdfind` is on `PATH`.
     pub fn check() -> Result<Self> {
         info!("Checking dependencies...");
 

@@ -16,30 +16,13 @@ use tokio::{
 };
 use tracing::{debug, warn};
 
-/// Run the `fd` command to find files matching one or more literal patterns.
-///
-/// The function builds a combined regex pattern from the list of patterns, runs the
-/// command asynchronously, and collects matching file paths in a map keyed by the literal
-/// file name.
-///
-/// # Arguments
-///
-/// - `deps`: Dependencies hold the path to the `fd` binary.
-/// - `dir`: The directory in which to search.
-/// - `patterns`: A list of file name patterns (literals) to match.
-/// - `max_depth`: The maximum directory depth for the search.
-///
-/// # Returns
-///
-/// A map where each key is one of the patterns and the value is the list of matching
-/// file paths.
+/// Find files matching literal names with `fd`.
 pub async fn find_files(
     deps: &Dependencies,
     dir: &Path,
     patterns: &[&str],
     max_depth: usize,
 ) -> Result<HashMap<String, Vec<PathBuf>>> {
-    // Build a regex pattern that matches any of the provided (literal) patterns.
     let combined_patterns = format!(
         "({})",
         patterns
@@ -66,7 +49,6 @@ pub async fn find_files(
         .spawn()
         .map_err(|e| ProjectFinderError::command(&deps.fd_path, e))?;
 
-    // Capture stdout and wrap it with a buffered reader.
     let stdout = child
         .stdout
         .take()
@@ -76,21 +58,17 @@ pub async fn find_files(
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
 
-    // Prepare the results map with an empty vector for each pattern.
     let mut results = patterns
         .iter()
         .map(|pattern| ((*pattern).to_string(), Vec::new()))
         .collect::<HashMap<_, _>>();
 
-    // Stream and process output as lines arrive.
     while let Some(line) = lines
         .next_line()
         .await
         .map_err(|e| ProjectFinderError::command(&deps.fd_path, e))?
     {
         let path = PathBuf::from(line);
-        // For each found file, only add it if its file name exactly matches one
-        // of the provided patterns.
         if let Some(file_name) = path.file_name().and_then(|f| f.to_str())
             && let Some(entries) = results.get_mut(file_name)
         {
@@ -98,7 +76,6 @@ pub async fn find_files(
         }
     }
 
-    // Wait for the command to finish.
     let status = child
         .wait()
         .await
@@ -110,20 +87,7 @@ pub async fn find_files(
     Ok(results)
 }
 
-/// Find Git repositories by searching for '.git' directories.
-///
-/// This function invokes the `fd` command with the pattern '^.git$'. For each
-/// found directory, it returns the parent path (the Git repository root).
-///
-/// # Arguments
-///
-/// - `deps`: Dependencies containing the path to the `fd` binary.
-/// - `dir`: The directory to search for Git repositories.
-/// - `max_depth`: The maximum directory depth to search.
-///
-/// # Returns
-///
-/// A vector of paths representing the roots of Git repositories.
+/// Find Git repository roots with `fd`.
 pub async fn find_git_repos(
     deps: &Dependencies,
     dir: &Path,
@@ -157,7 +121,6 @@ pub async fn find_git_repos(
         source: e,
     })?;
 
-    // For each found '.git' directory, return its parent directory.
     let paths = stdout
         .lines()
         .filter_map(|line| {
@@ -169,18 +132,11 @@ pub async fn find_git_repos(
     Ok(paths)
 }
 
-/// A test applied to a file's contents.
-///
-/// These replace the regexes the workspace rules used to carry: every pattern
-/// in use was a plain substring or line-prefix check, so a regex engine bought
-/// nothing but a compile on every call and a fallible path.
+/// A content check for workspace files.
 #[derive(Debug, Clone, Copy)]
 pub enum ContentTest {
-    /// Any of the given substrings appears somewhere in the file.
     ContainsAny(&'static [&'static str]),
-    /// Some line, ignoring leading whitespace, starts with the given text.
     LineStartsWith(&'static str),
-    /// The file holds something other than whitespace.
     NonEmpty,
 }
 
@@ -196,11 +152,7 @@ impl ContentTest {
     }
 }
 
-/// Read `file` into memory and check its contents against `test`.
-///
-/// A missing file is not an error, it simply fails the test. That lets callers
-/// probe for optional config files with a single read rather than a stat
-/// followed by a read.
+/// A missing file does not match.
 pub async fn file_matches(file: &Path, test: ContentTest) -> Result<bool> {
     match read_to_string(file).await {
         Ok(contents) => Ok(test.matches(&contents)),
@@ -225,8 +177,6 @@ mod tests {
     #[test]
     fn line_starts_with_ignores_position_in_file() {
         let test = ContentTest::LineStartsWith("[workspace]");
-        // The old `^\[workspace\]` regex was anchored to the start of the whole
-        // file, so it missed any manifest with a comment or table above it.
         assert!(test.matches("# a comment\n[workspace]\nmembers = []"));
         assert!(test.matches("[workspace]"));
         assert!(!test.matches("[workspace.dependencies]\n"));

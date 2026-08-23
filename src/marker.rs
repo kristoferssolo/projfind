@@ -1,8 +1,4 @@
-/// File names that mark a project root.
-///
-/// This list is the single source of truth: it is passed verbatim to `fd` as a
-/// set of literal patterns, and every name in it is classified by
-/// [`MarkerType::from`].
+/// File names that identify projects.
 pub const MARKER_FILES: [&str; 13] = [
     "package.json",
     "pnpm-workspace.yaml",
@@ -19,21 +15,13 @@ pub const MARKER_FILES: [&str; 13] = [
     "bunfig.toml",
 ];
 
-/// How a marker file influences project-root detection.
-///
-/// Classification is total: any unrecognized file name becomes
-/// [`MarkerType::OtherConfig`], so conversion cannot fail.
+/// How a marker determines its project root.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MarkerType {
-    /// Ascends to the enclosing JavaScript workspace root.
     PackageJson,
-    /// Ascends to the enclosing Cargo workspace root.
     CargoToml,
-    /// Ascends to the enclosing Deno workspace root.
     DenoJson,
-    /// Ascends to the highest directory holding the same build file.
     BuildFile(String),
-    /// Ascends to the enclosing git repository only.
     OtherConfig(String),
 }
 

@@ -52,7 +52,6 @@ tempfile = "3.27"
 pedantic = "warn"
 nursery = "warn"
 unwrap_used = "warn"
-expect_used = "warn"
 
 [[bench]]
 name = "benchmark"

@@ -20,20 +20,16 @@ pub fn run_binary_with_args(path: &Path, params: &BenchParams) -> Result<()> {
 
     let mut cmd = Command::new(&binary_path);
 
-    // Add the path to search
     cmd.arg(path);
 
     if let Some(depth) = params.depth {
-        // Add depth parameter
         cmd.arg("--depth").arg(depth.to_string());
     }
 
-    // Add max_results parameter if not zero
     if let Some(max_results) = params.max_results {
         cmd.arg("--max-results").arg(max_results.to_string());
     }
 
-    // Add verbose flag if true
     if params.verbose {
         cmd.arg("--verbose");
     }

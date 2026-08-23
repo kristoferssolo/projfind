@@ -14,7 +14,6 @@ use tempfile::TempDir;
 
 pub static TEMP_DIR: OnceLock<TempDir> = OnceLock::new();
 
-/// Build the shared fixture tree on first call and return it.
 pub fn init_temp_dir() -> &'static TempDir {
     TEMP_DIR.get_or_init(|| setup_entries().expect("Failed to setup test directory"))
 }
@@ -84,8 +83,6 @@ fn last_snaphow_file(dir: &Path) -> Result<PathBuf> {
 
                 let file_name = file_name.to_string_lossy();
                 let caps = re.captures(&file_name)?;
-                // Year, month, day, hour, minute, second: comparing them in
-                // that order sorts snapshots chronologically.
                 let timestamp: [u32; 6] = (1..=6)
                     .filter_map(|group| caps.get(group)?.as_str().parse().ok())
                     .collect::<Vec<_>>()
@@ -170,8 +167,6 @@ impl FileEntry {
         match self.entry_type {
             EntryType::Dir => create_dir(&full_path),
             EntryType::File => create_file(&full_path),
-            // Snapshots record symlinks and other node types, but recreating
-            // them adds nothing to what the benchmark measures.
             EntryType::Symlink | EntryType::Other(_) => Ok(()),
         }
     }

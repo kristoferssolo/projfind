@@ -1,8 +1,3 @@
-//! End-to-end tests that drive the built binary.
-//!
-//! These require `fd` on `PATH`, the same dependency the binary itself checks
-//! for at startup.
-
 use color_eyre::eyre::{Result, bail};
 use std::{
     fs::{create_dir_all, write},
@@ -13,8 +8,6 @@ use tempfile::TempDir;
 
 const BIN: &str = env!("CARGO_BIN_EXE_project-finder");
 
-/// Build a tree holding a git repository, a Cargo project and a plain
-/// directory, and return it.
 fn sample_tree() -> Result<TempDir> {
     let temp = TempDir::new()?;
     let root = temp.path();
@@ -32,7 +25,6 @@ fn run(args: &[&str]) -> Result<Output> {
     Ok(Command::new(BIN).args(args).output()?)
 }
 
-/// Run against `root` and return the reported projects, relative to `root`.
 fn found_projects(root: &Path, extra_args: &[&str]) -> Result<Vec<PathBuf>> {
     let root = root.to_string_lossy().into_owned();
     let mut args = vec![root.as_str()];

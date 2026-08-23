@@ -26,7 +26,6 @@ type RootCache = Arc<RwLock<HashMap<(PathBuf, MarkerType), PathBuf>>>;
 /// spawn an unbounded number of `fd` processes.
 const MAX_CONCURRENT_SEARCHES: usize = 8;
 
-/// A `Cargo.toml` declaring a workspace.
 const CARGO_WORKSPACE: ContentTest = ContentTest::LineStartsWith("[workspace]");
 
 /// Files that mark a workspace root only when their contents say so.
@@ -59,26 +58,18 @@ const WORKSPACE_FILES: [&str; 5] = [
     "workspace.json", // Generic workspace file
 ];
 
-/// Check whether a given path exists, treating an unreadable path as absent.
 async fn path_exists(path: &Path) -> bool {
     try_exists(path).await.unwrap_or(false)
 }
 
-/// `dir`'s ancestors, nearest first.
-///
-/// Stops before the empty path that `Path::ancestors` yields for relative
-/// paths, so a relative search never walks past its own starting point.
+/// Ancestors nearest first, excluding the empty relative path.
 fn ancestors_above(dir: &Path) -> impl Iterator<Item = &Path> {
     dir.ancestors()
         .skip(1)
         .take_while(|ancestor| !ancestor.as_os_str().is_empty())
 }
 
-/// Whether `candidate` is already accounted for by `known`.
-///
-/// A direct child is kept: a nested project one level down is usually a real
-/// project of a different kind, such as a Cargo crate inside a JavaScript
-/// monorepo. Anything deeper is treated as part of `known`.
+/// Direct children remain separate projects. Deeper paths are covered.
 fn is_covered_by(candidate: &Path, known: &Path) -> bool {
     if candidate == known {
         return true;
@@ -89,16 +80,11 @@ fn is_covered_by(candidate: &Path, known: &Path) -> bool {
     candidate.starts_with(known) && !is_direct_child
 }
 
-/// Whether `dir` is the top of a git working tree.
 fn is_git_repo(dir: &Path) -> bool {
     dir.join(".git").is_dir()
 }
 
-/// Climb `dir`'s ancestors and return the first that `is_root` accepts or that
-/// holds a `.git` directory, whichever comes first.
-///
-/// Falls back to `dir` itself when the ascent reaches the filesystem root, so
-/// a marker outside any repository still names a project.
+/// Find the nearest workspace or Git root, falling back to `dir`.
 async fn ascend_to_root<F, Fut>(dir: &Path, is_root: F) -> Result<PathBuf>
 where
     F: Fn(PathBuf) -> Fut,
@@ -113,11 +99,7 @@ where
     Ok(dir.to_path_buf())
 }
 
-/// Climb `dir`'s ancestors tracking the highest directory that also holds
-/// `build_file`, and stop at the enclosing git repository.
-///
-/// The repository boundary wins: a `Makefile` above the repository root
-/// belongs to a different project, not this one.
+/// Find the highest build-file ancestor within the enclosing repository.
 fn ascend_to_highest_build_file(dir: &Path, build_file: &str) -> PathBuf {
     let mut highest = dir;
 
@@ -134,7 +116,6 @@ fn ascend_to_highest_build_file(dir: &Path, build_file: &str) -> PathBuf {
     highest.to_path_buf()
 }
 
-/// Struct responsible for scanning directories and detecting projects.
 #[derive(Debug, Clone)]
 pub struct ProjectFinder {
     config: Config,
@@ -145,7 +126,6 @@ pub struct ProjectFinder {
 }
 
 impl ProjectFinder {
-    /// Create a new `ProjectFinder` instance.
     pub fn new(config: Config, deps: Dependencies) -> Self {
         Self {
             config,
@@ -156,7 +136,6 @@ impl ProjectFinder {
         }
     }
 
-    /// Find projects in the configured paths.
     pub async fn find_projects(&self) -> Result<Vec<PathBuf>> {
         let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_SEARCHES));
         let mut handles = Vec::with_capacity(self.config.paths.len());
@@ -188,7 +167,6 @@ impl ProjectFinder {
             ));
         }
 
-        // Await every task, keeping the errors so a total failure can be reported.
         let mut errors = Vec::new();
         for (path, handle) in handles {
             let error = match handle.await {
@@ -200,15 +178,12 @@ impl ProjectFinder {
             errors.push(error);
         }
 
-        // A partial failure still reports what the surviving paths found; only a
-        // total failure is fatal.
         if errors.len() == self.config.paths.len()
             && let Some(error) = errors.into_iter().next()
         {
             return Err(error);
         }
 
-        // Gather discovered projects, sort and apply max_results limit, if set.
         let mut projects = self
             .discovered_projects
             .read()
@@ -224,7 +199,6 @@ impl ProjectFinder {
         Ok(projects)
     }
 
-    /// Process a single directory by scanning for git repositories and marker files.
     async fn process_directory(&self, dir: &Path) -> Result<()> {
         let (git_repos, marker_map) = tokio::try_join!(
             find_git_repos(&self.deps, dir, self.config.depth),
@@ -247,8 +221,6 @@ impl ProjectFinder {
         Ok(())
     }
 
-    /// Process a marker file found in a directory.
-    /// Record the project that owns a marker file found in `dir`.
     async fn process_marker(&self, dir: &Path, marker_name: &str) -> Result<()> {
         let marker_type = MarkerType::from(marker_name);
         let project_root = self.find_project_root(dir, &marker_type).await?;
@@ -267,10 +239,7 @@ impl ProjectFinder {
         Ok(())
     }
 
-    /// Resolve the project root that owns the marker found in `dir`.
-    ///
-    /// Results are cached: sibling markers under the same tree resolve to the
-    /// same root and would otherwise repeat the whole ascent.
+    /// Cache root resolution for sibling markers.
     async fn find_project_root(&self, dir: &Path, marker_type: &MarkerType) -> Result<PathBuf> {
         let cache_key = (dir.to_path_buf(), marker_type.clone());
         {
@@ -305,10 +274,7 @@ impl ProjectFinder {
         Ok(root)
     }
 
-    /// Check whether `dir` is the root of a multi-package workspace.
-    ///
-    /// Results are cached because the ascent in [`Self::find_project_root`]
-    /// revisits the same ancestors for every marker found beneath them.
+    /// Cache workspace checks during root ascent.
     async fn is_workspace_root(&self, dir: &Path) -> Result<bool> {
         if let Some(&cached) = self.workspace_cache.read().await.get(dir) {
             return Ok(cached);
@@ -341,9 +307,6 @@ impl ProjectFinder {
 }
 
 #[cfg(test)]
-// Test setup that cannot build its fixture has nothing to assert, so panicking
-// is the intended outcome.
-#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use claims::{assert_none, assert_ok_eq, assert_some_eq};
@@ -351,7 +314,6 @@ mod tests {
     use std::fs::{create_dir_all, write};
     use tempfile::TempDir;
 
-    /// Build `root/a/b`, with `.git` at `root`, and return the leaf.
     fn repo_with_nested_dirs(root: &Path) -> PathBuf {
         create_dir_all(root.join(".git")).expect("create .git");
         let leaf = root.join("a/b");
@@ -359,7 +321,6 @@ mod tests {
         leaf
     }
 
-    /// An ascent predicate that accepts any directory holding `file`.
     fn holds(file: &'static str) -> impl Fn(PathBuf) -> std::future::Ready<Result<bool>> {
         move |dir: PathBuf| std::future::ready(Ok(dir.join(file).exists()))
     }
@@ -420,8 +381,6 @@ mod tests {
         write(leaf.join("Makefile"), "").expect("write leaf Makefile");
         write(temp.path().join("a/Makefile"), "").expect("write parent Makefile");
 
-        // `.git` sits at the temp root, so the ascent stops there regardless of
-        // where the highest `Makefile` was found.
         assert_eq!(
             ascend_to_highest_build_file(&leaf, "Makefile"),
             temp.path().to_path_buf()

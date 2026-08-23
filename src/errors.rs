@@ -57,7 +57,6 @@ pub enum ProjectFinderError {
 }
 
 impl ProjectFinderError {
-    /// Name the binary that failed alongside the [`io::Error`] it raised.
     pub fn command(binary: &Path, source: io::Error) -> Self {
         Self::Command {
             binary: binary.to_path_buf(),
@@ -65,7 +64,6 @@ impl ProjectFinderError {
         }
     }
 
-    /// Name the file that could not be read alongside the [`io::Error`] it raised.
     pub fn read_file(path: &Path, source: io::Error) -> Self {
         Self::ReadFile {
             path: path.to_path_buf(),
