@@ -341,6 +341,9 @@ impl ProjectFinder {
 }
 
 #[cfg(test)]
+// Test setup that cannot build its fixture has nothing to assert, so panicking
+// is the intended outcome.
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use claims::{assert_none, assert_ok_eq, assert_some_eq};
