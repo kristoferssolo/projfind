@@ -1,9 +1,8 @@
-mod commands;
 mod config;
 mod dependencies;
 mod errors;
 mod finder;
-mod marker;
+mod scan;
 
 use crate::{config::Config, dependencies::Dependencies, finder::ProjectFinder};
 use clap::Parser;
