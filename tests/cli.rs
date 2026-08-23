@@ -83,9 +83,15 @@ impl Run {
     }
 }
 
+fn repository(dir: &Path) -> Result<()> {
+    create_dir_all(dir.join(".git"))?;
+    write(dir.join(".git/HEAD"), "ref: refs/heads/main\n")?;
+    Ok(())
+}
+
 fn sample_tree() -> Result<TempDir> {
     let temp = TempDir::new()?;
-    create_dir_all(temp.path().join("alpha/.git"))?;
+    repository(&temp.path().join("alpha"))?;
     create_dir_all(temp.path().join("beta"))?;
     write(
         temp.path().join("beta/Cargo.toml"),
@@ -247,7 +253,7 @@ fn the_configuration_file_replaces_the_built_in_defaults() -> Result<()> {
 fn command_line_paths_override_the_configured_ones() -> Result<()> {
     let configured = sample_tree()?;
     let requested = TempDir::new()?;
-    create_dir_all(requested.path().join("gamma/.git"))?;
+    repository(&requested.path().join("gamma"))?;
 
     let projects = Run::new()?
         .config(&format!(

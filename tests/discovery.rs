@@ -45,6 +45,7 @@ fn expect(paths: &[&str]) -> Vec<PathBuf> {
 
 fn repository(dir: &Path) -> Result<()> {
     create_dir_all(dir.join(".git"))?;
+    write(dir.join(".git/HEAD"), "ref: refs/heads/main\n")?;
     Ok(())
 }
 
