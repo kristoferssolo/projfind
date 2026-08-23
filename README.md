@@ -24,7 +24,8 @@ To use Project Finder, you need the following dependencies installed on your sys
 * **fd:** A simple, fast, and user-friendly alternative to `find`.
   * Installation instructions: [https://github.com/sharkdp/fd#installation](https://github.com/sharkdp/fd#installation)
 
-These tools must be available in your system's PATH.
+`fd` must be available in your system's PATH.
+Debian and Ubuntu package it as `fdfind`, which is also recognised.
 
 ## Installation
 
@@ -41,7 +42,7 @@ project-finder [OPTIONS] [PATHS]
 ### Options
 
 * **-d, --depth <DEPTH>**: Maximum search depth (default: 5)
-* **-n, --max-results <MAX_RESULTS>**: Maximum number of results to return (default: 0, unlimited)
+* **-n, --max-results <MAX_RESULTS>**: Maximum number of results to return (default: unlimited)
 * **-v, --verbose**: Show verbose output
 * **PATHS**: Directories to search for projects (default: ".")
 
@@ -71,12 +72,48 @@ project-finder --verbose /path/to/search1 /path/to/search2
 project-finder --max-results 10
 ```
 
+## How a project root is chosen
+
+Project Finder reports the directory that owns a marker, not the directory the
+marker sits in. Starting from the marker, it climbs the ancestors and stops at
+the first of:
+
+* a workspace root, for `package.json`, `deno.json` and `Cargo.toml` markers.
+  A `pnpm-workspace.yaml`, `lerna.json`, `yarn.lock`, `.yarnrc.yml` or
+  `workspace.json` marks one by existing; `package.json`, `deno.json`,
+  `deno.jsonc`, `bunfig.toml`, `Cargo.toml`, `rush.json`, `nx.json` and
+  `turbo.json` mark one when their contents say so.
+* a directory holding `.git`.
+
+Build files (`Makefile`, `CMakeLists.txt`, `justfile`, `Justfile`) instead
+resolve to the highest directory holding the same build file, bounded by the
+enclosing repository. Anything else resolves to the enclosing repository, or to
+the marker's own directory when there is none.
+
+A project nested one level inside another is reported separately, since a crate
+inside a JavaScript monorepo is usually a project in its own right. Anything
+deeper is treated as part of its parent.
+
 ## Use Cases
 
 * **Quickly locating projects:** Easily find all projects within a large directory structure.
 * **Managing multiple repositories:** Discover all repositories in a directory.
 * **Automated scripting:** Integrate project discovery into scripts for build automation, testing, or deployment.
 * **Workspace management:** Identify workspace roots for managing multiple related projects.
+
+## Development
+
+The [justfile](justfile) wraps the common tasks. `just` on its own lists them.
+
+```bash
+just check      # formatting, clippy, tests and docs, as CI runs them
+just test       # tests only
+just run -d 3 ~/src
+just bench      # builds the release binary, then benchmarks against a fixture
+```
+
+Benchmarks replay a directory tree captured in `benches/fixtures`. Capture a
+new one with `just snapshot <DIRECTORY>...`.
 
 ## License
 
