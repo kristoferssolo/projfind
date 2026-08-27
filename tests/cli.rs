@@ -161,6 +161,23 @@ fn recorded_projects_are_ranked_before_untracked_projects() -> Result<()> {
 }
 
 #[test]
+fn bash_completions_include_nested_history_commands() -> Result<()> {
+    let output = Run::new()?.arg("completions").arg("bash").stdout()?;
+
+    assert!(output.contains("projfind__subcmd__history__subcmd__adjust"));
+    assert!(output.contains("projfind__subcmd__history__subcmd__clear"));
+    Ok(())
+}
+
+#[test]
+fn powershell_completions_are_rejected() -> Result<()> {
+    let stderr = Run::new()?.arg("completions").arg("powershell").failure()?;
+
+    assert!(stderr.contains("invalid value 'powershell'"));
+    Ok(())
+}
+
+#[test]
 fn history_list_and_show_report_project_scores() -> Result<()> {
     let temp = sample_tree()?;
     let run = Run::new()?.home(temp.path()).arg("add").arg("~/beta");

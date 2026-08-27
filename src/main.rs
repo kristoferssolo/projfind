@@ -3,13 +3,18 @@ use color_eyre::{
     eyre::{Result, WrapErr},
 };
 use projfind::{
-    config::{Config, HistoryCommand, Invocation, contract_tilde, home},
+    completions,
+    config::{Config, HistoryCommand, Invocation, cli_command, contract_tilde, home},
     dependencies::Dependencies,
     errors::ProjectFinderError,
     finder::ProjectFinder,
     history::{History, HistoryEntry, ScoreChange, history_file_path},
 };
-use std::{fs, io::stderr, path::Path};
+use std::{
+    fs,
+    io::{stderr, stdout},
+    path::Path,
+};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -22,6 +27,10 @@ async fn main() -> Result<()> {
 
     match Invocation::load().wrap_err("Failed to load arguments")? {
         Invocation::Find(config) => find_projects(config).await,
+        Invocation::Completions(shell) => {
+            completions::generate(shell, &mut cli_command(), &mut stdout());
+            Ok(())
+        }
         Invocation::Add(path) => add_project(&path),
         Invocation::History(command) => manage_history(command),
     }

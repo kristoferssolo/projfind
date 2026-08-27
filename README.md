@@ -73,6 +73,18 @@ last visit, and path. `set` creates a missing entry. `adjust` requires an
 existing entry and removes it when the result falls below `1`. `clear` removes
 the entire history.
 
+## Shell completions
+
+`projfind completions <SHELL>` generates completions for Bash, Elvish, Fish, or
+Zsh. With `bash-completion` installed, add the Bash script to its per-user
+completion directory:
+
+```bash
+projfind completions bash
+```
+
+Start a new shell to load it.
+
 ## Configuration
 
 Built-in defaults come from [`config/config.toml`](config/config.toml). User
@@ -83,10 +95,10 @@ Configured fields replace their defaults; command-line options override both.
 A leading `~` in `search_dirs` expands to `$HOME`.
 
 ```toml
-search_dirs = [ "~/src", "/home/me/work" ]
+search_dirs = ["~/src", "/home/me/work"]
 depth = 5
-marker_files = [ "Cargo.toml", "package.json", "pyproject.toml" ]
-workspace_files = [ "pnpm-workspace.yaml", "lerna.json" ]
+marker_files = ["Cargo.toml", "package.json", "pyproject.toml"]
+workspace_files = ["pnpm-workspace.yaml", "lerna.json"]
 ```
 
 ## Root resolution
