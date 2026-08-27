@@ -15,6 +15,10 @@ const HISTORY_VERSION: u8 = 1;
 const MAX_TOTAL_SCORE: f64 = 10_000.0;
 const AGED_TOTAL_SCORE: f64 = MAX_TOTAL_SCORE * 0.9;
 
+const HOUR: u64 = 3600;
+const DAY: u64 = 24 * HOUR;
+const WEEK: u64 = 7 * DAY;
+
 /// Returns the history file location from the XDG data directory or home directory.
 #[must_use]
 pub fn history_file_path() -> Option<PathBuf> {
@@ -41,6 +45,21 @@ fn history_file_path_from(
 pub struct History {
     path: PathBuf,
     projects: Vec<ProjectUsage>,
+}
+
+#[derive(Debug)]
+pub struct HistoryEntry {
+    pub path: PathBuf,
+    pub score: f64,
+    pub frecency: f64,
+    pub last_used: Duration,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ScoreChange {
+    Set(f64),
+    Adjust(f64),
+    Remove,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -110,6 +129,84 @@ impl History {
     /// Returns an error if the system clock is before the Unix epoch.
     pub fn sort(&self, projects: &mut [PathBuf]) -> Result<()> {
         self.sort_at(projects, SystemTime::now())
+    }
+
+    /// Returns recorded projects ordered by descending frecency.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the system clock is before the Unix epoch.
+    pub fn entries(&self) -> Result<Vec<HistoryEntry>> {
+        let now = unix_timestamp(SystemTime::now())?;
+        let mut entries = self
+            .projects
+            .iter()
+            .map(|project| project.entry(now))
+            .collect::<Vec<_>>();
+        entries.sort_unstable_by(|left, right| {
+            right
+                .frecency
+                .total_cmp(&left.frecency)
+                .then_with(|| left.path.cmp(&right.path))
+        });
+        Ok(entries)
+    }
+
+    /// Applies a score change and persists it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid scores, missing entries, invalid clocks, or writes.
+    pub fn update(&mut self, path: &Path, change: ScoreChange) -> Result<()> {
+        let position = self
+            .projects
+            .iter()
+            .position(|project| project.path == path);
+        match change {
+            ScoreChange::Set(score) => {
+                validate_score(score)?;
+                if let Some(position) = position {
+                    self.projects[position].score = score;
+                } else {
+                    self.projects.push(ProjectUsage {
+                        path: path.to_path_buf(),
+                        score,
+                        last_accessed: unix_timestamp(SystemTime::now())?,
+                    });
+                }
+            }
+            ScoreChange::Adjust(delta) => {
+                if !delta.is_finite() {
+                    return Err(ProjectFinderError::InvalidScore(delta));
+                }
+                let position = position
+                    .ok_or_else(|| ProjectFinderError::HistoryEntryNotFound(path.into()))?;
+                let score = self.projects[position].score + delta;
+                if score < 1.0 {
+                    self.projects.remove(position);
+                } else {
+                    validate_score(score)?;
+                    self.projects[position].score = score;
+                }
+            }
+            ScoreChange::Remove => {
+                let position = position
+                    .ok_or_else(|| ProjectFinderError::HistoryEntryNotFound(path.into()))?;
+                self.projects.remove(position);
+            }
+        }
+        self.age();
+        self.save()
+    }
+
+    /// Removes every entry and persists the empty history.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the history cannot be written.
+    pub fn clear(&mut self) -> Result<()> {
+        self.projects.clear();
+        self.save()
     }
 
     fn record_at(&mut self, path: &Path, now: SystemTime) -> Result<()> {
@@ -199,17 +296,34 @@ impl History {
 
 impl ProjectUsage {
     fn frecency(&self, now: u64) -> f64 {
-        let age = Duration::from_secs(now.saturating_sub(self.last_accessed));
-        let multiplier = if age < Duration::from_hours(1) {
+        let age = now.saturating_sub(self.last_accessed);
+        let multiplier = if age < HOUR {
             4.0
-        } else if age < Duration::from_hours(24) {
+        } else if age < DAY {
             2.0
-        } else if age < Duration::from_hours(7 * 24) {
+        } else if age < WEEK {
             0.5
         } else {
             0.25
         };
         self.score * multiplier
+    }
+
+    fn entry(&self, now: u64) -> HistoryEntry {
+        HistoryEntry {
+            path: self.path.clone(),
+            score: self.score,
+            frecency: self.frecency(now),
+            last_used: Duration::from_secs(now.saturating_sub(self.last_accessed)),
+        }
+    }
+}
+
+fn validate_score(score: f64) -> Result<()> {
+    if score.is_finite() && score >= 1.0 {
+        Ok(())
+    } else {
+        Err(ProjectFinderError::InvalidScore(score))
     }
 }
 

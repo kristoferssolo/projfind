@@ -42,12 +42,51 @@ enum CliCommand {
         #[arg(help = "Project directory to record")]
         path: PathBuf,
     },
+
+    /// Inspects or changes project history.
+    History {
+        #[command(subcommand)]
+        command: HistoryCommand,
+    },
 }
 
 #[derive(Debug)]
 pub enum Invocation {
     Find(Config),
     Add(PathBuf),
+    History(HistoryCommand),
+}
+
+#[derive(Debug, Subcommand, Clone)]
+pub enum HistoryCommand {
+    /// Lists every recorded project.
+    List,
+    /// Shows one recorded project.
+    Show {
+        #[arg(help = "Project directory to inspect")]
+        path: PathBuf,
+    },
+    /// Sets a project's raw score.
+    Set {
+        #[arg(help = "Project directory to change")]
+        path: PathBuf,
+        #[arg(help = "New raw score")]
+        score: f64,
+    },
+    /// Adds a positive or negative amount to a project's raw score.
+    Adjust {
+        #[arg(help = "Project directory to change")]
+        path: PathBuf,
+        #[arg(allow_hyphen_values = true, help = "Amount to add to the raw score")]
+        delta: f64,
+    },
+    /// Removes one project from history.
+    Remove {
+        #[arg(help = "Project directory to remove")]
+        path: PathBuf,
+    },
+    /// Removes every project from history.
+    Clear,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,11 +121,40 @@ impl Invocation {
     /// Returns an error when the configuration file cannot be read or parsed.
     pub fn load() -> Result<Self> {
         let cli = Cli::parse();
-        if let Some(CliCommand::Add { path }) = &cli.command {
-            return Ok(Self::Add(expand_tilde(path, home().as_deref())));
+        let home = home();
+        match &cli.command {
+            Some(CliCommand::Add { path }) => {
+                return Ok(Self::Add(expand_tilde(path, home.as_deref())));
+            }
+            Some(CliCommand::History { command }) => {
+                return Ok(Self::History(command.clone().expand_path(home.as_deref())));
+            }
+            None => {}
         }
 
         Config::from_sources(cli, config_file_path().as_deref()).map(Self::Find)
+    }
+}
+
+impl HistoryCommand {
+    fn expand_path(self, home: Option<&Path>) -> Self {
+        match self {
+            Self::Show { path } => Self::Show {
+                path: expand_tilde(&path, home),
+            },
+            Self::Set { path, score } => Self::Set {
+                path: expand_tilde(&path, home),
+                score,
+            },
+            Self::Adjust { path, delta } => Self::Adjust {
+                path: expand_tilde(&path, home),
+                delta,
+            },
+            Self::Remove { path } => Self::Remove {
+                path: expand_tilde(&path, home),
+            },
+            command @ (Self::List | Self::Clear) => command,
+        }
     }
 }
 

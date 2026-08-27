@@ -27,6 +27,12 @@ pub enum ProjectFinderError {
     #[error("Could not determine the project history location")]
     HistoryLocationNotFound,
 
+    #[error("Project is not present in history: {}", .0.display())]
+    HistoryEntryNotFound(PathBuf),
+
+    #[error("Project score must be a finite number of at least 1, got {0}")]
+    InvalidScore(f64),
+
     #[error("Failed to run `{}`", .binary.display())]
     Command {
         binary: PathBuf,

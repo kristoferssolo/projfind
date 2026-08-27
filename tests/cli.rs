@@ -57,6 +57,10 @@ impl Run {
     }
 
     fn projects(&self) -> Result<Vec<String>> {
+        Ok(self.stdout()?.lines().map(str::to_owned).collect())
+    }
+
+    fn stdout(&self) -> Result<String> {
         let output = self.output()?;
         if !output.status.success() {
             bail!(
@@ -65,10 +69,7 @@ impl Run {
             );
         }
 
-        Ok(String::from_utf8(output.stdout)?
-            .lines()
-            .map(str::to_owned)
-            .collect())
+        Ok(String::from_utf8(output.stdout)?)
     }
 
     fn failure(&self) -> Result<String> {
@@ -156,6 +157,98 @@ fn recorded_projects_are_ranked_before_untracked_projects() -> Result<()> {
         .projects()?;
 
     assert_eq!(projects, ["~/beta"]);
+    Ok(())
+}
+
+#[test]
+fn history_list_and_show_report_project_scores() -> Result<()> {
+    let temp = sample_tree()?;
+    let run = Run::new()?.home(temp.path()).arg("add").arg("~/beta");
+    run.stdout()?;
+
+    let run = run.clear_args().arg("history").arg("list");
+    let fields = run
+        .stdout()?
+        .trim()
+        .split('\t')
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+    assert_eq!(fields[0], "1");
+    assert_eq!(fields[1], "4");
+    assert!(fields[2].ends_with('s'), "unexpected age: {}", fields[2]);
+    assert_eq!(fields[3], "~/beta");
+
+    let run = run.clear_args().arg("history").arg("show").arg("~/beta");
+    let output = run.stdout()?;
+    assert!(output.ends_with("\t~/beta\n"));
+    Ok(())
+}
+
+#[test]
+fn history_scores_can_be_set_and_adjusted() -> Result<()> {
+    let temp = sample_tree()?;
+    let run = Run::new()?
+        .home(temp.path())
+        .arg("history")
+        .arg("set")
+        .arg("~/beta")
+        .arg("10");
+    run.stdout()?;
+
+    let run = run
+        .clear_args()
+        .arg("history")
+        .arg("adjust")
+        .arg("~/beta")
+        .arg("-3");
+    run.stdout()?;
+
+    let run = run.clear_args().arg("history").arg("show").arg("~/beta");
+    let output = run.stdout()?;
+    assert!(output.starts_with("7\t28\t"), "unexpected output: {output}");
+
+    let run = run
+        .clear_args()
+        .arg("history")
+        .arg("adjust")
+        .arg("~/beta")
+        .arg("-7");
+    run.stdout()?;
+    assert!(
+        run.clear_args()
+            .arg("history")
+            .arg("list")
+            .stdout()?
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[test]
+fn history_entries_can_be_removed_individually_or_all_at_once() -> Result<()> {
+    let temp = sample_tree()?;
+    let run = Run::new()?.home(temp.path()).arg("add").arg("~/alpha");
+    run.stdout()?;
+    let run = run.clear_args().arg("add").arg("~/beta");
+    run.stdout()?;
+
+    let run = run.clear_args().arg("history").arg("remove").arg("~/alpha");
+    run.stdout()?;
+    let run = run.clear_args().arg("history").arg("list");
+    let output = run.stdout()?;
+    assert!(!output.contains("~/alpha"));
+    assert!(output.contains("~/beta"));
+
+    let run = run.clear_args().arg("history").arg("clear");
+    run.stdout()?;
+    assert!(
+        run.clear_args()
+            .arg("history")
+            .arg("list")
+            .stdout()?
+            .is_empty()
+    );
     Ok(())
 }
 
