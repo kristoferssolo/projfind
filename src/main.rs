@@ -64,6 +64,7 @@ fn manage_history(command: HistoryCommand) -> Result<()> {
         HistoryCommand::Remove { path } => {
             history.update(&normalize_path(&path)?, ScoreChange::Remove)?;
         }
+        HistoryCommand::Prune => history.prune()?,
         HistoryCommand::Clear => history.clear()?,
     }
     Ok(())

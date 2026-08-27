@@ -109,6 +109,8 @@ pub enum HistoryCommand {
         #[arg(help = "Project directory to remove")]
         path: PathBuf,
     },
+    /// Removes projects whose paths no longer exist.
+    Prune,
     /// Removes every project from history.
     Clear,
 }
@@ -186,7 +188,7 @@ impl HistoryCommand {
             Self::Remove { path } => Self::Remove {
                 path: expand_tilde(&path, home),
             },
-            command @ (Self::List | Self::Clear) => command,
+            command @ (Self::List | Self::Prune | Self::Clear) => command,
         }
     }
 }

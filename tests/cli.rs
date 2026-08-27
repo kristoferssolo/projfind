@@ -264,6 +264,7 @@ fn bash_completions_include_nested_history_commands() -> Result<()> {
 
     assert!(output.contains("mekle__subcmd__history__subcmd__adjust"));
     assert!(output.contains("mekle__subcmd__history__subcmd__clear"));
+    assert!(output.contains("mekle__subcmd__history__subcmd__prune"));
     Ok(())
 }
 
@@ -426,6 +427,28 @@ fn history_entries_can_be_removed_individually_or_all_at_once() -> Result<()> {
             .stdout()?
             .is_empty()
     );
+    Ok(())
+}
+
+#[test]
+fn history_prune_removes_projects_that_no_longer_exist() -> Result<()> {
+    let temp = sample_tree()?;
+    let run = Run::new()?.home(temp.path()).arg("add").arg("~/beta");
+    run.stdout()?;
+    let run = run
+        .clear_args()
+        .arg("history")
+        .arg("set")
+        .arg("~/missing")
+        .arg("10");
+    run.stdout()?;
+
+    let run = run.clear_args().arg("history").arg("prune");
+    run.stdout()?;
+    let output = run.clear_args().arg("history").arg("list").stdout()?;
+
+    assert!(output.contains("~/beta"));
+    assert!(!output.contains("~/missing"));
     Ok(())
 }
 

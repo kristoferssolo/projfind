@@ -95,13 +95,15 @@ mekle history set ~/src/mekle 20
 mekle history adjust ~/src/mekle 5
 mekle history adjust ~/src/mekle -5
 mekle history remove ~/src/mekle
+mekle history prune
 mekle history clear
 ```
 
 `list` and `show` print tab-separated raw score, weighted score, time since the
 last visit, and path. `set` creates a missing entry. `adjust` requires an
-existing entry and removes it when the result falls below `1`. `clear` removes
-the entire history.
+existing entry and removes it when the result falls below `1`. `prune` removes
+entries whose project paths no longer exist. `clear` removes the entire
+history.
 
 ## Shell completions
 

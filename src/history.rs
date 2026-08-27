@@ -210,6 +210,32 @@ impl History {
         self.save()
     }
 
+    /// Removes entries whose project paths no longer exist and persists the history.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a path cannot be checked or the history cannot be written.
+    pub fn prune(&mut self) -> Result<()> {
+        let exists = self
+            .projects
+            .iter()
+            .map(|project| {
+                project
+                    .path
+                    .try_exists()
+                    .map_err(|source| ProjectFinderError::read_file(&project.path, source))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        self.projects = self
+            .projects
+            .drain(..)
+            .zip(exists)
+            .filter_map(|(project, exists)| exists.then_some(project))
+            .collect();
+        self.save()
+    }
+
     fn record_at(&mut self, path: &Path, now: SystemTime) -> Result<()> {
         let timestamp = unix_timestamp(now)?;
         if let Some(project) = self
