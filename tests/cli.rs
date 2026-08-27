@@ -170,6 +170,44 @@ fn bash_completions_include_nested_history_commands() -> Result<()> {
 }
 
 #[test]
+fn fish_completions_disable_paths_before_a_subcommand() -> Result<()> {
+    let output = Run::new()?.arg("completions").arg("fish").stdout()?;
+
+    assert_eq!(
+        output.lines().last(),
+        Some("complete -c projfind -n \"__fish_projfind_needs_command\" -f")
+    );
+    Ok(())
+}
+
+#[test]
+fn bash_completions_disable_paths_before_a_subcommand() -> Result<()> {
+    let output = Run::new()?.arg("completions").arg("bash").stdout()?;
+
+    assert!(output.contains("complete -F __projfind_complete -o nosort projfind"));
+    assert!(output.contains(r#""${COMP_WORDS[1]}" == "add" && ${COMP_CWORD} -eq 2"#));
+    assert!(output.contains(r"COMPREPLY+=( $(compgen -f"));
+    Ok(())
+}
+
+#[test]
+fn zsh_completions_disable_paths_before_a_subcommand() -> Result<()> {
+    let output = Run::new()?.arg("completions").arg("zsh").stdout()?;
+
+    assert!(output.contains("'::paths -- Directories to search:'"));
+    assert!(output.contains("':path -- Project directory to record:_files'"));
+    Ok(())
+}
+
+#[test]
+fn elvish_completions_do_not_include_root_paths() -> Result<()> {
+    let output = Run::new()?.arg("completions").arg("elvish").stdout()?;
+
+    assert!(!output.contains("Directories to search"));
+    Ok(())
+}
+
+#[test]
 fn powershell_completions_are_rejected() -> Result<()> {
     let stderr = Run::new()?.arg("completions").arg("powershell").failure()?;
 

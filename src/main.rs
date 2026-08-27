@@ -28,7 +28,7 @@ async fn main() -> Result<()> {
     match Invocation::load().wrap_err("Failed to load arguments")? {
         Invocation::Find(config) => find_projects(config).await,
         Invocation::Completions(shell) => {
-            completions::generate(shell, &mut cli_command(), &mut stdout());
+            completions::generate(shell, &mut cli_command(), &mut stdout())?;
             Ok(())
         }
         Invocation::Add(path) => add_project(&path),
