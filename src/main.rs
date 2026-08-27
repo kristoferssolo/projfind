@@ -3,11 +3,13 @@ use color_eyre::{
     eyre::{Result, WrapErr},
 };
 use projfind::{
-    config::{Config, contract_tilde, home},
+    config::{Config, HistoryCommand, Invocation, contract_tilde, home},
     dependencies::Dependencies,
+    errors::ProjectFinderError,
     finder::ProjectFinder,
+    history::{History, HistoryEntry, ScoreChange, history_file_path},
 };
-use std::io::stderr;
+use std::{fs, io::stderr, path::Path};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -18,14 +20,84 @@ async fn main() -> Result<()> {
         .display_env_section(false)
         .install()?;
 
-    let config = Config::load().wrap_err("Failed to load configuration")?;
+    match Invocation::load().wrap_err("Failed to load arguments")? {
+        Invocation::Find(config) => find_projects(config).await,
+        Invocation::Add(path) => add_project(&path),
+        Invocation::History(command) => manage_history(command),
+    }
+}
+
+fn manage_history(command: HistoryCommand) -> Result<()> {
+    let history_path = history_file_path().ok_or(ProjectFinderError::HistoryLocationNotFound)?;
+    let mut history = History::open(history_path)?;
+    match command {
+        HistoryCommand::List => print_entries(history.entries()?),
+        HistoryCommand::Show { path } => {
+            let path = normalize_path(&path)?;
+            let entry = history
+                .entries()?
+                .into_iter()
+                .find(|entry| entry.path == path)
+                .ok_or_else(|| ProjectFinderError::HistoryEntryNotFound(path))?;
+            print_entries([entry]);
+        }
+        HistoryCommand::Set { path, score } => {
+            history.update(&normalize_path(&path)?, ScoreChange::Set(score))?;
+        }
+        HistoryCommand::Adjust { path, delta } => {
+            history.update(&normalize_path(&path)?, ScoreChange::Adjust(delta))?;
+        }
+        HistoryCommand::Remove { path } => {
+            history.update(&normalize_path(&path)?, ScoreChange::Remove)?;
+        }
+        HistoryCommand::Clear => history.clear()?,
+    }
+    Ok(())
+}
+
+fn print_entries(entries: impl IntoIterator<Item = HistoryEntry>) {
+    let home = home();
+    for entry in entries {
+        let path = contract_tilde(&entry.path, home.as_deref());
+        println!(
+            "{}\t{}\t{}\t{}",
+            entry.score,
+            entry.frecency,
+            format_age(entry.last_used),
+            path.display()
+        );
+    }
+}
+
+fn format_age(age: std::time::Duration) -> String {
+    let seconds = age.as_secs();
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 60 * 60 {
+        format!("{}m", seconds / 60)
+    } else if seconds < 24 * 60 * 60 {
+        format!("{}h", seconds / (60 * 60))
+    } else {
+        format!("{}d", seconds / (24 * 60 * 60))
+    }
+}
+
+async fn find_projects(mut config: Config) -> Result<()> {
     init_logging(config.verbose).wrap_err("Failed to set up logging")?;
 
+    // Ranking needs the complete result set before applying the output limit.
+    let max_results = config.max_results.take();
     let deps = Dependencies::check()?;
-    let projects = ProjectFinder::new(config, deps)
+    let mut projects = ProjectFinder::new(config, deps)
         .find_projects()
         .await
         .wrap_err("Failed to find projects")?;
+    if let Some(path) = history_file_path() {
+        History::open(path)?.sort(&mut projects)?;
+    }
+    if let Some(max) = max_results {
+        projects.truncate(max.get());
+    }
 
     let home = home();
     for project in projects {
@@ -33,6 +105,36 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn add_project(path: &Path) -> Result<()> {
+    if !path.is_dir() {
+        return Err(ProjectFinderError::PathNotFound(path.to_path_buf()).into());
+    }
+    let project = normalize_path(path)?;
+    let history_path = history_file_path().ok_or(ProjectFinderError::HistoryLocationNotFound)?;
+    History::open(history_path)?.record(&project)?;
+    Ok(())
+}
+
+fn normalize_path(path: &Path) -> Result<std::path::PathBuf> {
+    if path.exists() {
+        return fs::canonicalize(path).map_err(|source| {
+            ProjectFinderError::ResolvePath {
+                path: path.to_path_buf(),
+                source,
+            }
+            .into()
+        });
+    }
+
+    std::path::absolute(path).map_err(|source| {
+        ProjectFinderError::ResolvePath {
+            path: path.to_path_buf(),
+            source,
+        }
+        .into()
+    })
 }
 
 fn init_logging(verbose: bool) -> Result<()> {

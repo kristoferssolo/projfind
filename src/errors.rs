@@ -1,6 +1,7 @@
 use std::{
     io,
     path::{Path, PathBuf},
+    time::SystemTimeError,
 };
 use thiserror::Error;
 use tokio::{sync::AcquireError, task::JoinError};
@@ -15,6 +16,22 @@ pub enum ProjectFinderError {
 
     #[error("Path not found: {0}")]
     PathNotFound(PathBuf),
+
+    #[error("Failed to resolve project path {}", .path.display())]
+    ResolvePath {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Could not determine the project history location")]
+    HistoryLocationNotFound,
+
+    #[error("Project is not present in history: {}", .0.display())]
+    HistoryEntryNotFound(PathBuf),
+
+    #[error("Project score must be a finite number of at least 1, got {0}")]
+    InvalidScore(f64),
 
     #[error("Failed to run `{}`", .binary.display())]
     Command {
@@ -46,6 +63,35 @@ pub enum ProjectFinderError {
         source: toml::de::Error,
     },
 
+    #[error("Failed to parse project history at {}", .path.display())]
+    ParseHistory {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+
+    #[error("Project history at {} uses unsupported version {version}", .path.display())]
+    UnsupportedHistoryVersion { path: PathBuf, version: u8 },
+
+    #[error("Failed to serialize project history")]
+    SerializeHistory {
+        #[source]
+        source: toml::ser::Error,
+    },
+
+    #[error("Failed to write {}", .path.display())]
+    WriteFile {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("The system clock is before the Unix epoch")]
+    InvalidSystemTime {
+        #[source]
+        source: SystemTimeError,
+    },
+
     #[error("Failed to schedule the search of {}", .path.display())]
     Scheduling {
         path: PathBuf,
@@ -73,6 +119,14 @@ impl ProjectFinderError {
     #[must_use]
     pub fn read_file(path: &Path, source: io::Error) -> Self {
         Self::ReadFile {
+            path: path.to_path_buf(),
+            source,
+        }
+    }
+
+    #[must_use]
+    pub fn write_file(path: &Path, source: io::Error) -> Self {
+        Self::WriteFile {
             path: path.to_path_buf(),
             source,
         }
