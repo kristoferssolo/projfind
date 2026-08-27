@@ -43,7 +43,7 @@ pub struct ProjectFinder {
 impl ProjectFinder {
     #[must_use]
     pub fn new(config: Config, deps: Dependencies) -> Self {
-        let root_resolver = RootResolver::new(config.workspace_files.clone());
+        let root_resolver = RootResolver::from_config(&config);
 
         Self {
             config,

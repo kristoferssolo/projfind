@@ -69,7 +69,7 @@ pub enum Invocation {
     Find(Config),
     Completions(CompletionShell),
     Init(CompletionShell),
-    Add(PathBuf),
+    Add(PathBuf, Config),
     History(HistoryCommand),
 }
 
@@ -154,7 +154,9 @@ impl Invocation {
             Some(CliCommand::Completions { shell }) => return Ok(Self::Completions(*shell)),
             Some(CliCommand::Init { shell }) => return Ok(Self::Init(*shell)),
             Some(CliCommand::Add { path }) => {
-                return Ok(Self::Add(expand_tilde(path, home.as_deref())));
+                let path = expand_tilde(path, home.as_deref());
+                let config = Config::from_sources(cli, config_file_path().as_deref())?;
+                return Ok(Self::Add(path, config));
             }
             Some(CliCommand::History { command }) => {
                 return Ok(Self::History(command.clone().expand_path(home.as_deref())));

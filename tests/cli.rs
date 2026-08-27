@@ -13,6 +13,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_mekle");
 struct Run {
     config_home: TempDir,
     home: Option<PathBuf>,
+    current_dir: Option<PathBuf>,
     args: Vec<OsString>,
 }
 
@@ -21,6 +22,7 @@ impl Run {
         Ok(Self {
             config_home: TempDir::new()?,
             home: None,
+            current_dir: None,
             args: Vec::new(),
         })
     }
@@ -42,6 +44,11 @@ impl Run {
         self
     }
 
+    fn current_dir(mut self, path: &Path) -> Self {
+        self.current_dir = Some(path.to_path_buf());
+        self
+    }
+
     fn output(&self) -> Result<Output> {
         let mut command = Command::new(BIN);
         command
@@ -53,6 +60,9 @@ impl Run {
             Some(home) => command.env("HOME", home),
             None => command.env_remove("HOME"),
         };
+        if let Some(current_dir) = &self.current_dir {
+            command.current_dir(current_dir);
+        }
 
         Ok(command.output()?)
     }
@@ -150,6 +160,29 @@ fn recorded_projects_are_ranked_before_untracked_projects() -> Result<()> {
         "unexpected stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let projects = run
+        .clear_args()
+        .arg(temp.path())
+        .arg("--max-results")
+        .arg("1")
+        .projects()?;
+
+    assert_eq!(projects, ["~/beta"]);
+    Ok(())
+}
+
+#[test]
+fn adding_a_nested_directory_records_the_discovered_project_root() -> Result<()> {
+    let temp = sample_tree()?;
+    let nested = temp.path().join("beta/src/finder");
+    create_dir_all(&nested)?;
+    let run = Run::new()?
+        .home(temp.path())
+        .current_dir(&nested)
+        .arg("add")
+        .arg(".");
+    run.stdout()?;
+
     let projects = run
         .clear_args()
         .arg(temp.path())

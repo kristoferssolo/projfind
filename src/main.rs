@@ -7,7 +7,7 @@ use mekle::{
     config::{Config, HistoryCommand, Invocation, cli_command, contract_tilde, home},
     dependencies::Dependencies,
     errors::ProjectFinderError,
-    finder::ProjectFinder,
+    finder::{ProjectFinder, root::RootResolver},
     history::{History, HistoryEntry, ScoreChange, history_file_path},
     output::{rank_projects, write_projects},
 };
@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
             print!("{}", completion_shell.init());
             Ok(())
         }
-        Invocation::Add(path) => add_project(&path),
+        Invocation::Add(path, config) => add_project(&path, &RootResolver::from_config(&config)),
         Invocation::History(command) => manage_history(command),
     }
 }
@@ -128,11 +128,11 @@ async fn find_projects(mut config: Config) -> Result<()> {
     Ok(())
 }
 
-fn add_project(path: &Path) -> Result<()> {
+fn add_project(path: &Path, resolver: &RootResolver) -> Result<()> {
     if !path.is_dir() {
         return Err(ProjectFinderError::PathNotFound(path.to_path_buf()).into());
     }
-    let project = normalize_path(path)?;
+    let project = resolver.resolve_directory(&normalize_path(path)?)?;
     let history_path = history_file_path().ok_or(ProjectFinderError::HistoryLocationNotFound)?;
     History::open(history_path)?.record(&project)?;
     Ok(())

@@ -1,6 +1,10 @@
-use crate::errors::{ProjectFinderError, Result};
+use super::is_covered;
+use crate::{
+    config::Config,
+    errors::{ProjectFinderError, Result},
+};
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap, HashSet},
     fs::read_to_string,
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -33,6 +37,7 @@ const POISONED: &str = "resolver cache lock poisoned";
 
 #[derive(Debug)]
 pub struct RootResolver {
+    marker_files: Box<[String]>,
     workspace_files: Box<[String]>,
     workspace_cache: RwLock<HashMap<PathBuf, bool>>,
     root_cache: RwLock<HashMap<(PathBuf, MarkerType), PathBuf>>,
@@ -42,10 +47,64 @@ impl RootResolver {
     #[must_use]
     pub fn new(workspace_files: Vec<String>) -> Self {
         Self {
+            marker_files: Box::default(),
             workspace_files: workspace_files.into(),
             workspace_cache: RwLock::default(),
             root_cache: RwLock::default(),
         }
+    }
+
+    #[must_use]
+    pub fn from_config(config: &Config) -> Self {
+        Self {
+            marker_files: config.marker_files.clone().into(),
+            workspace_files: config.workspace_files.clone().into(),
+            workspace_cache: RwLock::default(),
+            root_cache: RwLock::default(),
+        }
+    }
+
+    /// Resolves an arbitrary directory to the most specific project root that
+    /// discovery would report for one of its ancestors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a marker or workspace manifest cannot be inspected.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a cache lock is poisoned.
+    pub fn resolve_directory(&self, dir: &Path) -> Result<PathBuf> {
+        let mut projects = HashSet::new();
+        let mut candidates = BTreeSet::new();
+
+        for ancestor in dir.ancestors() {
+            if is_git_repo(ancestor) {
+                projects.insert(ancestor.to_path_buf());
+            }
+
+            for marker_name in &self.marker_files {
+                let marker = ancestor.join(marker_name);
+                if marker
+                    .try_exists()
+                    .map_err(|source| ProjectFinderError::read_file(&marker, source))?
+                {
+                    candidates.insert(self.resolve(ancestor, marker_name)?);
+                }
+            }
+        }
+
+        for candidate in candidates {
+            if !is_covered(&candidate, &projects) {
+                projects.insert(candidate);
+            }
+        }
+
+        Ok(projects
+            .into_iter()
+            .filter(|candidate| dir.starts_with(candidate))
+            .max_by_key(|candidate| candidate.components().count())
+            .unwrap_or_else(|| dir.to_path_buf()))
     }
 
     /// Resolves a marker's project root.
@@ -269,6 +328,25 @@ mod tests {
             ascend_to_root(&leaf, holds("pnpm-workspace.yaml")),
             temp.path().join("a")
         );
+    }
+
+    #[test]
+    fn directory_resolution_uses_discovery_coverage_rules() {
+        let temp = TempDir::new().expect("create temp dir");
+        let service = temp.path().join("service");
+        let tool = service.join("tool");
+        let plugin = tool.join("plugin");
+        let nested = plugin.join("src");
+        for project in [&service, &tool, &plugin] {
+            create_dir_all(project).expect("create project dir");
+            write(project.join("go.mod"), "module example\n").expect("write marker");
+        }
+        create_dir_all(&nested).expect("create nested dir");
+        let mut config = Config::defaults().expect("load default config");
+        config.marker_files = vec!["go.mod".to_owned()];
+        let resolver = RootResolver::from_config(&config);
+
+        assert_ok_eq!(resolver.resolve_directory(&nested), tool);
     }
 
     #[test]
