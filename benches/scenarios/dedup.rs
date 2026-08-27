@@ -1,5 +1,5 @@
 use criterion::{BenchmarkId, Criterion, Throughput};
-use projfind::finder::is_covered;
+use mekle::finder::is_covered;
 use std::{collections::HashSet, hint::black_box, path::PathBuf};
 
 const CANDIDATE_COUNTS: [usize; 3] = [64, 1024, 16384];

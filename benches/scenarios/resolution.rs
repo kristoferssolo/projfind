@@ -1,6 +1,6 @@
 use crate::common::tree;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
-use projfind::{config::Config, finder::root::RootResolver};
+use mekle::{config::Config, finder::root::RootResolver};
 use std::{hint::black_box, path::PathBuf};
 use tempfile::TempDir;
 

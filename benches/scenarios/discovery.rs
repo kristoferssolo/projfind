@@ -1,7 +1,7 @@
 use crate::common::tree;
 use color_eyre::eyre::Result;
 use criterion::{BenchmarkId, Criterion, Throughput};
-use projfind::{config::Config, dependencies::Dependencies, finder::ProjectFinder};
+use mekle::{config::Config, dependencies::Dependencies, finder::ProjectFinder};
 use std::{hint::black_box, path::Path, time::Duration};
 use tempfile::TempDir;
 use tokio::runtime::Runtime;

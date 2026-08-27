@@ -2,7 +2,7 @@ use color_eyre::{
     config::HookBuilder,
     eyre::{Result, WrapErr},
 };
-use projfind::{
+use mekle::{
     completions,
     config::{Config, HistoryCommand, Invocation, cli_command, contract_tilde, home},
     dependencies::Dependencies,

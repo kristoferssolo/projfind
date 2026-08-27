@@ -1,6 +1,6 @@
 use claims::assert_err;
 use color_eyre::eyre::{Result, eyre};
-use projfind::{
+use mekle::{
     config::Config, dependencies::Dependencies, errors::ProjectFinderError, finder::ProjectFinder,
 };
 use std::{

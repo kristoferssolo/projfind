@@ -3,12 +3,12 @@ use clap_complete::{Shell, generate as generate_for};
 use std::io::{self, Write};
 
 const FISH_DISABLE_ROOT_PATH_COMPLETION: &str = concat!(
-    r#"complete -c projfind -n "__fish_projfind_needs_command" -f"#,
+    r#"complete -c mekle -n "__fish_mekle_needs_command" -f"#,
     "\n",
 );
 const BASH_SCOPE_PATH_COMPLETION: &str = r#"
-__projfind_complete() {
-    _projfind "$@"
+__mekle_complete() {
+    _mekle "$@"
 
     if [[ "${COMP_WORDS[1]}" == "add" && ${COMP_CWORD} -eq 2 ]] ||
        [[ "${COMP_WORDS[1]}" == "history" && ${COMP_CWORD} -eq 3 &&
@@ -18,9 +18,9 @@ __projfind_complete() {
 }
 
 if [[ "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -ge 4 || "${BASH_VERSINFO[0]}" -gt 4 ]]; then
-    complete -F __projfind_complete -o nosort projfind
+    complete -F __mekle_complete -o nosort mekle
 else
-    complete -F __projfind_complete projfind
+    complete -F __mekle_complete mekle
 fi
 "#;
 
@@ -45,12 +45,7 @@ pub fn generate(
     let mut completion_command = command
         .clone()
         .mut_arg("paths", |arg| arg.value_hint(ValueHint::Other));
-    generate_for(
-        Shell::from(shell),
-        &mut completion_command,
-        "projfind",
-        output,
-    );
+    generate_for(Shell::from(shell), &mut completion_command, "mekle", output);
 
     match shell {
         CompletionShell::Bash => output.write_all(BASH_SCOPE_PATH_COMPLETION.as_bytes())?,

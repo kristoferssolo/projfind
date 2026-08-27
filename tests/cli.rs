@@ -7,7 +7,7 @@ use std::{
 };
 use tempfile::TempDir;
 
-const BIN: &str = env!("CARGO_BIN_EXE_projfind");
+const BIN: &str = env!("CARGO_BIN_EXE_mekle");
 
 struct Run {
     config_home: TempDir,
@@ -30,7 +30,7 @@ impl Run {
     }
 
     fn config(self, contents: &str) -> Result<Self> {
-        let dir = self.config_home.path().join("projfind");
+        let dir = self.config_home.path().join("mekle");
         create_dir_all(&dir)?;
         write(dir.join("config.toml"), contents)?;
         Ok(self)
@@ -164,8 +164,8 @@ fn recorded_projects_are_ranked_before_untracked_projects() -> Result<()> {
 fn bash_completions_include_nested_history_commands() -> Result<()> {
     let output = Run::new()?.arg("completions").arg("bash").stdout()?;
 
-    assert!(output.contains("projfind__subcmd__history__subcmd__adjust"));
-    assert!(output.contains("projfind__subcmd__history__subcmd__clear"));
+    assert!(output.contains("mekle__subcmd__history__subcmd__adjust"));
+    assert!(output.contains("mekle__subcmd__history__subcmd__clear"));
     Ok(())
 }
 
@@ -175,7 +175,7 @@ fn fish_completions_disable_paths_before_a_subcommand() -> Result<()> {
 
     assert_eq!(
         output.lines().last(),
-        Some("complete -c projfind -n \"__fish_projfind_needs_command\" -f")
+        Some("complete -c mekle -n \"__fish_mekle_needs_command\" -f")
     );
     Ok(())
 }
@@ -184,7 +184,7 @@ fn fish_completions_disable_paths_before_a_subcommand() -> Result<()> {
 fn bash_completions_disable_paths_before_a_subcommand() -> Result<()> {
     let output = Run::new()?.arg("completions").arg("bash").stdout()?;
 
-    assert!(output.contains("complete -F __projfind_complete -o nosort projfind"));
+    assert!(output.contains("complete -F __mekle_complete -o nosort mekle"));
     assert!(output.contains(r#""${COMP_WORDS[1]}" == "add" && ${COMP_CWORD} -eq 2"#));
     assert!(output.contains(r"COMPREPLY+=( $(compgen -f"));
     Ok(())

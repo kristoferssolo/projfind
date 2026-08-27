@@ -1,15 +1,15 @@
 [package]
-name = "projfind"
-authors = [ "Kristofers Solo <dev@kristofers.xyz>" ]
-version = "0.3.0"
+name = "mekle"
+authors = ["Kristofers Solo <dev@kristofers.xyz>"]
+version = "0.1.0"
 edition = "2024"
 description = "Fast project discovery tool for developers"
-repository = "https://github.com/kristoferssolo/projfind"
-documentation = "https://docs.rs/projfind"
-homepage = "https://github.com/kristoferssolo/projfind"
+repository = "https://github.com/kristoferssolo/mekle"
+documentation = "https://docs.rs/mekle"
+homepage = "https://github.com/kristoferssolo/mekle"
 license = "MIT OR Apache-2.0"
-keywords = [ "cli", "project", "discovery", "developer-tools" ]
-categories = [ "command-line-utilities" ]
+keywords = ["cli", "project", "discovery", "developer-tools"]
+categories = ["command-line-utilities"]
 exclude = [
   ".github/",
   ".gitignore",
@@ -22,21 +22,21 @@ exclude = [
 readme = "README.md"
 
 [dependencies]
-clap = {version = "4.6", features = [ "derive" ]}
+clap = { version = "4.6", features = ["derive"] }
 clap_complete = "4.6"
 color-eyre = "0.6"
 regex = "1.13"
-serde = {version = "1", features = [ "derive" ]}
+serde = { version = "1", features = ["derive"] }
 tempfile = "3.27"
 thiserror = "2.0"
-tokio = {version = "1.53", features = [
+tokio = { version = "1.53", features = [
   "io-util",
   "macros",
   "process",
   "rt",
   "rt-multi-thread",
   "sync",
-]}
+] }
 toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
@@ -44,7 +44,7 @@ which = "8.0"
 
 [dev-dependencies]
 claims = "0.8"
-criterion = {version = "0.8", features = [ "async_tokio" ]}
+criterion = { version = "0.8", features = ["async_tokio"] }
 rstest = "0.26"
 
 [lints.clippy]

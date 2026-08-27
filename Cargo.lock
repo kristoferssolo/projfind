@@ -540,6 +540,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "mekle"
+version = "0.3.0"
+dependencies = [
+ "claims",
+ "clap",
+ "clap_complete",
+ "color-eyre",
+ "criterion",
+ "regex",
+ "rstest",
+ "serde",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "which",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -676,27 +697,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "projfind"
-version = "0.3.0"
-dependencies = [
- "claims",
- "clap",
- "clap_complete",
- "color-eyre",
- "criterion",
- "regex",
- "rstest",
- "serde",
- "tempfile",
- "thiserror",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "which",
 ]
 
 [[package]]

@@ -38,7 +38,7 @@ fn history_file_path_from(
                 .map(|path| path.join(".local/share"))
         })?;
 
-    Some(data_home.join("projfind/history.toml"))
+    Some(data_home.join("mekle/history.toml"))
 }
 
 #[derive(Debug)]
@@ -373,7 +373,7 @@ mod tests {
     fn xdg_data_home_takes_precedence() {
         let path = history_file_path_from(Some("/xdg".into()), Some("/home/user".into()));
 
-        assert_eq!(path, Some(PathBuf::from("/xdg/projfind/history.toml")));
+        assert_eq!(path, Some(PathBuf::from("/xdg/mekle/history.toml")));
     }
 
     #[test]
@@ -382,16 +382,14 @@ mod tests {
 
         assert_eq!(
             path,
-            Some(PathBuf::from(
-                "/home/user/.local/share/projfind/history.toml"
-            ))
+            Some(PathBuf::from("/home/user/.local/share/mekle/history.toml"))
         );
     }
 
     #[test]
     fn records_are_persisted() -> color_eyre::Result<()> {
         let temp = TempDir::new()?;
-        let database = temp.path().join("projfind/history.toml");
+        let database = temp.path().join("mekle/history.toml");
         let project = Path::new("/projects/favorite");
         let mut history = History::open(&database)?;
 

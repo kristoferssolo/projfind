@@ -47,10 +47,10 @@ jobs:
 
           manifest_version="$(
               cargo metadata --no-deps --format-version 1 |
-                  jq -r '.packages[] | select(.name == "projfind") | .version'
+                  jq -r '.packages[] | select(.name == "mekle") | .version'
           )"
           if [[ "$manifest_version" != "$version" ]]; then
-              echo "::error::projfind is version $manifest_version, not $version"
+              echo "::error::mekle is version $manifest_version, not $version"
               exit 1
           fi
 
@@ -80,11 +80,11 @@ jobs:
       - name: Publish crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_API_TOKEN }}
-        run: cargo publish --locked --package projfind
+        run: cargo publish --locked --package mekle
   # Archive names and layout match the `[package.metadata.binstall]` templates
-  # in `Cargo.toml`, so `cargo binstall projfind` resolves them directly.
+  # in `Cargo.toml`, so `cargo binstall mekle` resolves them directly.
   build-binaries:
-    name: Build projfind (${{ matrix.target }})
+    name: Build mekle (${{ matrix.target }})
     needs:
       - metadata
       - audit
@@ -108,7 +108,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - name: Build release binary
-        run: cargo build --locked --release --bin projfind --target ${{ matrix.target }}
+        run: cargo build --locked --release --bin mekle --target ${{ matrix.target }}
       - name: Package binary
         env:
           TARGET: ${{ matrix.target }}
@@ -116,9 +116,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          archive="projfind-$VERSION-$TARGET"
+          archive="mekle-$VERSION-$TARGET"
           mkdir -p "dist/$archive"
-          install -m 0755 "target/$TARGET/release/projfind" "dist/$archive/projfind"
+          install -m 0755 "target/$TARGET/release/mekle" "dist/$archive/mekle"
           cp LICENSE-APACHE LICENSE-MIT README.md "dist/$archive/"
           tar -C dist -czf "dist/$archive.tar.gz" "$archive"
           (
@@ -133,7 +133,7 @@ jobs:
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
         with:
-          name: projfind-${{ matrix.target }}
+          name: mekle-${{ matrix.target }}
           path: |
             dist/*.tar.gz
             dist/*.sha256
@@ -148,11 +148,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download projfind binaries
+      - name: Download mekle binaries
         uses: actions/download-artifact@v8
         with:
           path: dist
-          pattern: projfind-*
+          pattern: mekle-*
           merge-multiple: true
       - name: Create GitHub release
         env:
@@ -166,7 +166,7 @@ jobs:
           shopt -s nullglob
           assets=(dist/*.tar.gz dist/*.sha256)
           if (( ${#assets[@]} == 0 )); then
-              echo "::error::No projfind release assets were downloaded"
+              echo "::error::No mekle release assets were downloaded"
               exit 1
           fi
 
@@ -175,7 +175,7 @@ jobs:
               --generate-notes
               --latest
               --target "$GITHUB_SHA"
-              --title "projfind v$VERSION"
+              --title "mekle v$VERSION"
               "${assets[@]}"
           )
           if [[ "$IS_TAG_PUSH" == "true" ]]; then
