@@ -1,7 +1,7 @@
 [package]
 name = "projfind"
 authors = [ "Kristofers Solo <dev@kristofers.xyz>" ]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Fast project discovery tool for developers"
 repository = "https://github.com/kristoferssolo/projfind"
