@@ -56,6 +56,23 @@ about 90 percent of that limit and removes entries that fall below `1`.
 History is stored at `$XDG_DATA_HOME/projfind/history.toml`, falling back to
 `$HOME/.local/share/projfind/history.toml`.
 
+### Managing history
+
+```bash
+projfind history list
+projfind history show ~/src/projfind
+projfind history set ~/src/projfind 20
+projfind history adjust ~/src/projfind 5
+projfind history adjust ~/src/projfind -5
+projfind history remove ~/src/projfind
+projfind history clear
+```
+
+`list` and `show` print tab-separated raw score, weighted score, time since the
+last visit, and path. `set` creates a missing entry. `adjust` requires an
+existing entry and removes it when the result falls below `1`. `clear` removes
+the entire history.
+
 ## Configuration
 
 Built-in defaults come from [`config/config.toml`](config/config.toml). User
