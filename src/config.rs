@@ -1,5 +1,5 @@
 use crate::errors::{ProjectFinderError, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use serde::Deserialize;
 use std::{
     env,
@@ -19,6 +19,9 @@ const DEFAULT_CONFIG: &str = include_str!("../config/config.toml");
     about = "Find coding projects in specified directories"
 )]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<CliCommand>,
+
     #[arg(help = "Directories to search")]
     paths: Vec<PathBuf>,
 
@@ -30,6 +33,21 @@ struct Cli {
 
     #[arg(short = 'n', long, help = "Maximum number of results")]
     max_results: Option<NonZeroUsize>,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum CliCommand {
+    /// Records a visit to a project directory.
+    Add {
+        #[arg(help = "Project directory to record")]
+        path: PathBuf,
+    },
+}
+
+#[derive(Debug)]
+pub enum Invocation {
+    Find(Config),
+    Add(PathBuf),
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +72,22 @@ pub struct Config {
     pub verbose: bool,
     #[serde(default)]
     pub max_results: Option<NonZeroUsize>,
+}
+
+impl Invocation {
+    /// Loads the requested command and its effective configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the configuration file cannot be read or parsed.
+    pub fn load() -> Result<Self> {
+        let cli = Cli::parse();
+        if let Some(CliCommand::Add { path }) = &cli.command {
+            return Ok(Self::Add(expand_tilde(path, home().as_deref())));
+        }
+
+        Config::from_sources(cli, config_file_path().as_deref()).map(Self::Find)
+    }
 }
 
 impl Config {

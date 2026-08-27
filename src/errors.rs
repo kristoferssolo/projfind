@@ -17,6 +17,16 @@ pub enum ProjectFinderError {
     #[error("Path not found: {0}")]
     PathNotFound(PathBuf),
 
+    #[error("Failed to resolve project path {}", .path.display())]
+    ResolvePath {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Could not determine the project history location")]
+    HistoryLocationNotFound,
+
     #[error("Failed to run `{}`", .binary.display())]
     Command {
         binary: PathBuf,

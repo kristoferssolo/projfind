@@ -45,7 +45,8 @@ impl Run {
         let mut command = Command::new(BIN);
         command
             .args(&self.args)
-            .env("XDG_CONFIG_HOME", self.config_home.path());
+            .env("XDG_CONFIG_HOME", self.config_home.path())
+            .env("XDG_DATA_HOME", self.config_home.path());
 
         match &self.home {
             Some(home) => command.env("HOME", home),
@@ -80,6 +81,11 @@ impl Run {
         }
 
         Ok(String::from_utf8_lossy(&output.stderr).into_owned())
+    }
+
+    fn clear_args(mut self) -> Self {
+        self.args.clear();
+        self
     }
 }
 
@@ -128,6 +134,28 @@ fn max_results_truncates_the_output() -> Result<()> {
         .projects()?;
 
     assert_eq!(projects, joined(temp.path(), &["alpha"]));
+    Ok(())
+}
+
+#[test]
+fn recorded_projects_are_ranked_before_untracked_projects() -> Result<()> {
+    let temp = sample_tree()?;
+    let run = Run::new()?.home(temp.path()).arg("add").arg("~/beta");
+
+    let output = run.output()?;
+    assert!(
+        output.status.success(),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let projects = run
+        .clear_args()
+        .arg(temp.path())
+        .arg("--max-results")
+        .arg("1")
+        .projects()?;
+
+    assert_eq!(projects, ["~/beta"]);
     Ok(())
 }
 
