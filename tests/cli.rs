@@ -1,7 +1,8 @@
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{Result, bail, eyre};
 use std::{
     ffi::{OsStr, OsString},
     fs::{create_dir_all, write},
+    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     process::{Command, Output},
 };
@@ -157,6 +158,103 @@ fn recorded_projects_are_ranked_before_untracked_projects() -> Result<()> {
         .projects()?;
 
     assert_eq!(projects, ["~/beta"]);
+    Ok(())
+}
+
+#[test]
+fn null_output_uses_uncontracted_nul_delimited_paths() -> Result<()> {
+    let temp = TempDir::new()?;
+    let project = temp.path().join("line\nbreak");
+    repository(&project)?;
+
+    let output = Run::new()?
+        .home(temp.path())
+        .arg("--null")
+        .arg(temp.path())
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut expected = project.as_os_str().as_bytes().to_vec();
+    expected.push(0);
+    assert_eq!(output.stdout, expected);
+    Ok(())
+}
+
+#[test]
+fn json_output_includes_ranking_and_marker_metadata() -> Result<()> {
+    let temp = sample_tree()?;
+    write(
+        temp.path().join("alpha/Cargo.toml"),
+        "[package]\nname = \"alpha\"\n",
+    )?;
+    let run = Run::new()?.home(temp.path()).arg("add").arg("~/beta");
+    run.stdout()?;
+
+    let records = run
+        .clear_args()
+        .arg("--json")
+        .arg(temp.path())
+        .stdout()?
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<serde_json::Result<Vec<_>>>()?;
+
+    assert_eq!(records.len(), 2);
+    assert_eq!(
+        records[0]["path"].as_str(),
+        temp.path().join("beta").to_str()
+    );
+    assert_eq!(records[0]["score"], 1.0);
+    assert_eq!(records[0]["frecency"], 4.0);
+    assert!(records[0]["last_used"].is_u64());
+    assert_eq!(records[0]["markers"], serde_json::json!(["Cargo.toml"]));
+
+    assert_eq!(
+        records[1]["path"].as_str(),
+        temp.path().join("alpha").to_str()
+    );
+    assert_eq!(records[1]["score"], 0.0);
+    assert_eq!(records[1]["frecency"], 0.0);
+    assert!(records[1]["last_used"].is_null());
+    assert_eq!(
+        records[1]["markers"],
+        serde_json::json!([".git", "Cargo.toml"])
+    );
+    Ok(())
+}
+
+#[test]
+fn json_output_keeps_a_newline_in_one_record() -> Result<()> {
+    let temp = TempDir::new()?;
+    let project = temp.path().join("line\nbreak");
+    repository(&project)?;
+
+    let output = Run::new()?.arg("--json").arg(temp.path()).stdout()?;
+    let mut lines = output.lines();
+    let record = serde_json::from_str::<serde_json::Value>(
+        lines.next().ok_or_else(|| eyre!("missing JSON record"))?,
+    )?;
+
+    assert_eq!(record["path"].as_str(), project.to_str());
+    assert!(
+        lines.next().is_none(),
+        "path split into another JSON record"
+    );
+    Ok(())
+}
+
+#[test]
+fn json_and_null_output_are_mutually_exclusive() -> Result<()> {
+    let stderr = Run::new()?.arg("--json").arg("--null").failure()?;
+
+    assert!(
+        stderr.contains("cannot be used with"),
+        "unexpected stderr: {stderr}"
+    );
     Ok(())
 }
 

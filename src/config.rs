@@ -32,6 +32,17 @@ struct Cli {
 
     #[arg(short = 'n', long, help = "Maximum number of results")]
     max_results: Option<NonZeroUsize>,
+
+    #[arg(long, conflicts_with = "null", help = "Print newline-delimited JSON")]
+    json: bool,
+
+    #[arg(
+        short = '0',
+        long,
+        conflicts_with = "json",
+        help = "Print uncontracted paths separated by NUL bytes"
+    )]
+    null: bool,
 }
 
 #[derive(Debug, Subcommand, Clone)]
@@ -60,6 +71,14 @@ pub enum Invocation {
     Init(CompletionShell),
     Add(PathBuf),
     History(HistoryCommand),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OutputFormat {
+    #[default]
+    Path,
+    Json,
+    Null,
 }
 
 #[derive(Debug, Subcommand, Clone)]
@@ -116,6 +135,8 @@ pub struct Config {
     pub verbose: bool,
     #[serde(default)]
     pub max_results: Option<NonZeroUsize>,
+    #[serde(skip)]
+    pub output: OutputFormat,
 }
 
 impl Invocation {
@@ -270,6 +291,13 @@ impl Cli {
         if let Some(max_results) = self.max_results {
             config.max_results = Some(max_results);
         }
+        config.output = if self.json {
+            OutputFormat::Json
+        } else if self.null {
+            OutputFormat::Null
+        } else {
+            OutputFormat::Path
+        };
     }
 }
 
@@ -336,6 +364,7 @@ mod tests {
                 .any(|file| file == "pnpm-workspace.yaml")
         );
         assert_none!(config.max_results);
+        assert_eq!(config.output, OutputFormat::Path);
         Ok(())
     }
 

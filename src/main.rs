@@ -9,6 +9,7 @@ use mekle::{
     errors::ProjectFinderError,
     finder::ProjectFinder,
     history::{History, HistoryEntry, ScoreChange, history_file_path},
+    output::{rank_projects, write_projects},
 };
 use std::{
     fs,
@@ -100,22 +101,28 @@ async fn find_projects(mut config: Config) -> Result<()> {
 
     // Ranking needs the complete result set before applying the output limit.
     let max_results = config.max_results.take();
+    let output_format = config.output;
     let deps = Dependencies::check()?;
-    let mut projects = ProjectFinder::new(config, deps)
-        .find_projects()
+    let projects = ProjectFinder::new(config, deps)
+        .find_project_details()
         .await
         .wrap_err("Failed to find projects")?;
-    if let Some(path) = history_file_path() {
-        History::open(path)?.sort(&mut projects)?;
-    }
+    let history = history_file_path()
+        .map(History::open)
+        .transpose()?
+        .map_or_else(|| Ok(Vec::new()), |history| history.entries())?;
+    let mut projects = rank_projects(projects, &history);
     if let Some(max) = max_results {
         projects.truncate(max.get());
     }
 
-    let home = home();
-    for project in projects {
-        println!("{}", contract_tilde(&project, home.as_deref()).display());
-    }
+    let stdout = stdout();
+    write_projects(
+        &mut stdout.lock(),
+        &projects,
+        output_format,
+        home().as_deref(),
+    )?;
 
     Ok(())
 }

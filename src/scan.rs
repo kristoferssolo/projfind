@@ -4,6 +4,7 @@ use crate::{
 };
 use regex::escape;
 use std::{
+    ffi::OsString,
     iter::once,
     path::{Path, PathBuf},
     process::Stdio,
@@ -42,6 +43,7 @@ pub async fn scan_directory(
         .arg("f")
         .arg("--max-depth")
         .arg(max_depth.to_string())
+        .arg("--print0")
         .arg(search_pattern(marker_names))
         .arg(dir)
         .stdout(Stdio::piped());
@@ -57,18 +59,25 @@ pub async fn scan_directory(
         .ok_or_else(|| ProjectFinderError::MissingStdout {
             binary: deps.fd_path.clone(),
         })?;
-    let mut lines = BufReader::new(stdout).lines();
+    let mut reader = BufReader::new(stdout);
     let mut scan = DirectoryScan {
         git_repos: Vec::new(),
         marker_files: Vec::new(),
     };
 
-    while let Some(line) = lines
-        .next_line()
+    let mut record = Vec::new();
+    while reader
+        .read_until(b'\0', &mut record)
         .await
         .map_err(|error| ProjectFinderError::command(&deps.fd_path, error))?
+        != 0
     {
-        scan.classify(PathBuf::from(line));
+        if record.last() == Some(&0) {
+            record.pop();
+        }
+        scan.classify(PathBuf::from(os_string_from_bytes(std::mem::take(
+            &mut record,
+        ))));
     }
 
     let status = child
@@ -80,6 +89,18 @@ pub async fn scan_directory(
     }
 
     Ok(scan)
+}
+
+#[cfg(unix)]
+fn os_string_from_bytes(bytes: Vec<u8>) -> OsString {
+    use std::os::unix::ffi::OsStringExt;
+
+    OsString::from_vec(bytes)
+}
+
+#[cfg(not(unix))]
+fn os_string_from_bytes(bytes: Vec<u8>) -> OsString {
+    String::from_utf8_lossy(&bytes).into_owned().into()
 }
 
 fn search_pattern(marker_names: &[String]) -> String {

@@ -8,7 +8,7 @@ use crate::{
     scan::{DirectoryScan, scan_directory},
 };
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashMap, HashSet},
     hash::BuildHasher,
     path::{Path, PathBuf},
     sync::Arc,
@@ -17,6 +17,12 @@ use tokio::{spawn, sync::Semaphore};
 use tracing::{debug, info};
 
 const MAX_CONCURRENT_SEARCHES: usize = 8;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Project {
+    pub path: PathBuf,
+    pub markers: Vec<String>,
+}
 
 #[must_use]
 pub fn is_covered<S: BuildHasher>(candidate: &Path, known: &HashSet<PathBuf, S>) -> bool {
@@ -46,31 +52,62 @@ impl ProjectFinder {
         }
     }
 
-    /// Finds sorted project roots.
+    /// Finds sorted project root paths.
     ///
     /// # Errors
     ///
     /// Returns an error if no configured directory can be searched.
     pub async fn find_projects(&self) -> Result<Vec<PathBuf>> {
+        self.find_project_details()
+            .await
+            .map(|projects| projects.into_iter().map(|project| project.path).collect())
+    }
+
+    /// Finds sorted project roots and the markers that identified them.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no configured directory can be searched.
+    pub async fn find_project_details(&self) -> Result<Vec<Project>> {
         let scans = self.scan_all().await?;
 
-        let mut projects = scans
+        let mut project_paths = scans
             .iter()
             .flat_map(|scan| scan.git_repos.iter().cloned())
             .collect::<HashSet<_>>();
+        let mut markers = project_paths
+            .iter()
+            .cloned()
+            .map(|path| (path, BTreeSet::from([".git".to_owned()])))
+            .collect::<HashMap<_, _>>();
 
         let mut candidates = self.resolve_marker_roots(&scans)?;
         candidates.sort_unstable();
         candidates.dedup();
 
-        for candidate in candidates {
-            if !is_covered(&candidate, &projects) {
-                projects.insert(candidate);
-            }
+        for (candidate, marker) in candidates {
+            let project = candidate
+                .ancestors()
+                .skip(2)
+                .find(|ancestor| project_paths.contains(*ancestor))
+                .map_or_else(|| candidate.clone(), Path::to_path_buf);
+
+            project_paths.insert(project.clone());
+            markers.entry(project).or_default().insert(marker);
         }
 
-        let mut projects = projects.into_iter().collect::<Vec<_>>();
-        projects.sort_unstable();
+        let mut projects = project_paths
+            .into_iter()
+            .map(|path| Project {
+                markers: markers
+                    .remove(&path)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect(),
+                path,
+            })
+            .collect::<Vec<_>>();
+        projects.sort_unstable_by(|left, right| left.path.cmp(&right.path));
 
         if let Some(max) = self.config.max_results {
             projects.truncate(max.get());
@@ -136,14 +173,18 @@ impl ProjectFinder {
         Ok(scans)
     }
 
-    fn resolve_marker_roots(&self, scans: &[DirectoryScan]) -> Result<Vec<PathBuf>> {
+    fn resolve_marker_roots(&self, scans: &[DirectoryScan]) -> Result<Vec<(PathBuf, String)>> {
         scans
             .iter()
             .flat_map(|scan| scan.marker_files.iter())
             .filter_map(|marker| {
                 let dir = marker.parent()?;
                 let name = marker.file_name()?.to_str()?;
-                Some(self.root_resolver.resolve(dir, name))
+                Some(
+                    self.root_resolver
+                        .resolve(dir, name)
+                        .map(|root| (root, name.to_owned())),
+                )
             })
             .collect()
     }

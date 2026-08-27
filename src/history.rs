@@ -53,6 +53,7 @@ pub struct HistoryEntry {
     pub score: f64,
     pub frecency: f64,
     pub last_used: Duration,
+    pub last_used_at: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -315,6 +316,7 @@ impl ProjectUsage {
             score: self.score,
             frecency: self.frecency(now),
             last_used: Duration::from_secs(now.saturating_sub(self.last_accessed)),
+            last_used_at: self.last_accessed,
         }
     }
 }

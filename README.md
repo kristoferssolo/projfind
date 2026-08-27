@@ -24,16 +24,26 @@ mekle [OPTIONS] [PATHS]... [COMMAND]
 - `-d, --depth <DEPTH>` limits traversal depth (default: `5`).
 - `-n, --max-results <MAX_RESULTS>` limits output.
 - `-v, --verbose` prints progress to stderr.
+- `--json` prints one JSON object per line.
+- `-0, --null` prints uncontracted paths separated by NUL bytes.
 - `PATHS` replaces configured search directories (default: `.`).
 
-Paths under `$HOME` are printed as `~/...`.
+The default output prints one path per line and shortens paths under `$HOME` to
+`~/...`. JSON and NUL output do not shorten paths.
 
 ```bash
 mekle
 mekle --depth 3 ~/src
 mekle --verbose ~/src ~/work
+mekle --json ~/src
+mekle -0 ~/src | xargs -0 -n1 printf '%s\n'
 mekle add ~/src/mekle
 ```
+
+JSON output is newline-delimited. Each record has `path`, `score`, `frecency`,
+`last_used`, and `markers`. `last_used` is a Unix timestamp, or `null` for a
+project that is not in the history. Untracked projects have a score and
+frecency of `0`.
 
 ## Project ranking
 
