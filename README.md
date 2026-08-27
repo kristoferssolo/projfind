@@ -39,8 +39,26 @@ mekle add ~/src/mekle
 
 `mekle add <PATH>` records a project visit. The normal project list puts
 recorded projects first, ordered by frecency. Untracked projects remain sorted
-by path. Shell and picker integrations should call `add` after selecting a
-project because `mekle` does not observe directory changes itself.
+by path.
+
+`mekle init <SHELL>` defines `m`, which lists projects in `fzf`, changes to the
+selected directory, and records the visit. Add the command for your shell to
+its startup file:
+
+```bash
+# Bash and Zsh
+eval "$(mekle init bash)"
+eval "$(mekle init zsh)"
+
+# Fish
+mekle init fish | source
+
+# Elvish
+eval (mekle init elvish | slurp)
+```
+
+`m` accepts the same paths and options as `mekle`, for example `m ~/src`.
+The integration requires [`fzf`](https://github.com/junegunn/fzf).
 
 Each project starts with a score of `1`, and every later visit adds `1`. The
 time since the last visit adjusts that score:

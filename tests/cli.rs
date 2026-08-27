@@ -216,6 +216,30 @@ fn powershell_completions_are_rejected() -> Result<()> {
 }
 
 #[test]
+fn init_generates_a_picker_that_changes_and_records_the_directory() -> Result<()> {
+    for (shell, declaration) in [
+        ("bash", "m() {"),
+        ("elvish", "fn m {|@args|"),
+        ("fish", "function m"),
+        ("zsh", "function m() {"),
+    ] {
+        let output = Run::new()?.arg("init").arg(shell).stdout()?;
+
+        assert!(
+            output.contains(declaration),
+            "{shell} script does not define m"
+        );
+        assert!(output.contains("fzf"), "{shell} script does not invoke fzf");
+        assert!(
+            output.contains("mekle add"),
+            "{shell} script does not record the selection"
+        );
+        assert!(!output.contains("pf"), "{shell} script still defines pf");
+    }
+    Ok(())
+}
+
+#[test]
 fn history_list_and_show_report_project_scores() -> Result<()> {
     let temp = sample_tree()?;
     let run = Run::new()?.home(temp.path()).arg("add").arg("~/beta");

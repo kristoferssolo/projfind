@@ -38,6 +38,8 @@ struct Cli {
 enum CliCommand {
     /// Generates shell completions.
     Completions { shell: CompletionShell },
+    /// Generates a shell integration that defines `m`.
+    Init { shell: CompletionShell },
     /// Records a visit to a project directory.
     Add {
         #[arg(help = "Project directory to record")]
@@ -55,6 +57,7 @@ enum CliCommand {
 pub enum Invocation {
     Find(Config),
     Completions(CompletionShell),
+    Init(CompletionShell),
     Add(PathBuf),
     History(HistoryCommand),
 }
@@ -126,6 +129,7 @@ impl Invocation {
         let home = home();
         match &cli.command {
             Some(CliCommand::Completions { shell }) => return Ok(Self::Completions(*shell)),
+            Some(CliCommand::Init { shell }) => return Ok(Self::Init(*shell)),
             Some(CliCommand::Add { path }) => {
                 return Ok(Self::Add(expand_tilde(path, home.as_deref())));
             }

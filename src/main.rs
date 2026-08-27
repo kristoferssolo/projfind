@@ -31,6 +31,10 @@ async fn main() -> Result<()> {
             completions::generate(shell, &mut cli_command(), &mut stdout())?;
             Ok(())
         }
+        Invocation::Init(completion_shell) => {
+            print!("{}", completion_shell.init());
+            Ok(())
+        }
         Invocation::Add(path) => add_project(&path),
         Invocation::History(command) => manage_history(command),
     }
