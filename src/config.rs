@@ -1,5 +1,6 @@
+use crate::completions::CompletionShell;
 use crate::errors::{ProjectFinderError, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use serde::Deserialize;
 use std::{
     env,
@@ -9,9 +10,7 @@ use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
 };
-
 const DEFAULT_CONFIG: &str = include_str!("../config/config.toml");
-
 #[derive(Debug, Parser, Clone)]
 #[command(
     author,
@@ -37,6 +36,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand, Clone)]
 enum CliCommand {
+    /// Generates shell completions.
+    Completions { shell: CompletionShell },
     /// Records a visit to a project directory.
     Add {
         #[arg(help = "Project directory to record")]
@@ -53,6 +54,7 @@ enum CliCommand {
 #[derive(Debug)]
 pub enum Invocation {
     Find(Config),
+    Completions(CompletionShell),
     Add(PathBuf),
     History(HistoryCommand),
 }
@@ -123,6 +125,7 @@ impl Invocation {
         let cli = Cli::parse();
         let home = home();
         match &cli.command {
+            Some(CliCommand::Completions { shell }) => return Ok(Self::Completions(*shell)),
             Some(CliCommand::Add { path }) => {
                 return Ok(Self::Add(expand_tilde(path, home.as_deref())));
             }
@@ -134,6 +137,11 @@ impl Invocation {
 
         Config::from_sources(cli, config_file_path().as_deref()).map(Self::Find)
     }
+}
+/// Builds the complete command definition.
+#[must_use]
+pub fn cli_command() -> clap::Command {
+    Cli::command()
 }
 
 impl HistoryCommand {
