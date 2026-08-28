@@ -40,7 +40,8 @@ run *ARGS:
 install:
     cargo install --path . --locked
 
-# Benchmark. Requires `fd` on PATH, as the discovery group runs a real scan.
+# Benchmark. Pass a group or benchmark name to narrow the run, for example
+# `just bench ranking`. The scan and discovery groups need `fd` on PATH.
 bench *ARGS:
     cargo bench --bench benchmark -- {{ ARGS }}
 
