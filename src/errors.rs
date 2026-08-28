@@ -4,16 +4,9 @@ use std::{
     time::SystemTimeError,
 };
 use thiserror::Error;
-use tokio::{sync::AcquireError, task::JoinError};
 
 #[derive(Debug, Error)]
 pub enum ProjectFinderError {
-    #[error("Dependency not found: {name}. Install it from {url} and try again.")]
-    DependencyNotFound {
-        name: &'static str,
-        url: &'static str,
-    },
-
     #[error("Path not found: {0}")]
     PathNotFound(PathBuf),
 
@@ -32,16 +25,6 @@ pub enum ProjectFinderError {
 
     #[error("Project score must be a finite number of at least 1, got {0}")]
     InvalidScore(f64),
-
-    #[error("Failed to run `{}`", .binary.display())]
-    Command {
-        binary: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-
-    #[error("`{}` produced no stdout to read", .binary.display())]
-    MissingStdout { binary: PathBuf },
 
     #[error("Failed to read {}", .path.display())]
     ReadFile {
@@ -91,31 +74,9 @@ pub enum ProjectFinderError {
         #[source]
         source: SystemTimeError,
     },
-
-    #[error("Failed to schedule the search of {}", .path.display())]
-    Scheduling {
-        path: PathBuf,
-        #[source]
-        source: AcquireError,
-    },
-
-    #[error("The search of {} did not finish", .path.display())]
-    TaskFailed {
-        path: PathBuf,
-        #[source]
-        source: JoinError,
-    },
 }
 
 impl ProjectFinderError {
-    #[must_use]
-    pub fn command(binary: &Path, source: io::Error) -> Self {
-        Self::Command {
-            binary: binary.to_path_buf(),
-            source,
-        }
-    }
-
     #[must_use]
     pub fn read_file(path: &Path, source: io::Error) -> Self {
         Self::ReadFile {

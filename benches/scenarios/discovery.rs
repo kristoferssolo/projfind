@@ -1,25 +1,24 @@
-//! End-to-end discovery, measured against the bare `fd` scan it is built on.
+//! End-to-end discovery, measured against the bare walk it is built on.
 //!
-//! The two groups run the same trees at the same sizes. `scan` is the walk and
-//! its output parsing alone, so `discovery` minus `scan` is what mekle spends
-//! on root resolution and folding candidates into projects.
+//! The two groups run the same trees at the same sizes. `scan` is the parallel
+//! directory walk and its classification alone, so `discovery` minus `scan` is
+//! what mekle spends on root resolution and folding candidates into projects.
 //!
 //! Discovery builds a fresh [`ProjectFinder`] per iteration. A reused finder
 //! keeps its resolver caches warm, which no real invocation ever gets.
 
 use crate::common::tree;
 use color_eyre::eyre::Result;
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
-use mekle::{
-    config::Config, dependencies::Dependencies, finder::ProjectFinder, scan::scan_directory,
+use criterion::{
+    BatchSize, BenchmarkGroup, BenchmarkId, Criterion, Throughput, measurement::WallTime,
 };
+use mekle::{config::Config, finder::ProjectFinder, scan::scan_directories};
 use std::{
     hint::black_box,
     path::{Path, PathBuf},
     time::Duration,
 };
 use tempfile::TempDir;
-use tokio::runtime::Runtime;
 
 type Shape = fn(&Path, usize) -> Result<Vec<PathBuf>>;
 
@@ -34,9 +33,9 @@ const SIZES: [usize; 2] = [64, 512];
 
 const SEARCH_DEPTH: usize = 8;
 
-/// Every iteration spawns `fd`, so samples are few and each one is cheap to
-/// repeat; the defaults would spend minutes here for no extra resolution.
-fn tune(group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>) {
+/// Every iteration walks a whole tree, so samples are few and each one is cheap
+/// to repeat; the defaults would spend minutes here for no extra resolution.
+fn tune(group: &mut BenchmarkGroup<'_, WallTime>) {
     group
         .sample_size(10)
         .warm_up_time(Duration::from_secs(1))
@@ -44,8 +43,6 @@ fn tune(group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTi
 }
 
 pub fn benchmark_scan(c: &mut Criterion) {
-    let deps = dependencies();
-    let runtime = runtime();
     let marker_files = defaults().marker_files;
 
     let mut group = c.benchmark_group("scan");
@@ -55,13 +52,12 @@ pub fn benchmark_scan(c: &mut Criterion) {
         for size in SIZES {
             let temp = TempDir::new().expect("create a temporary directory");
             build(temp.path(), size).expect("build the tree");
+            let dirs = vec![temp.path().to_path_buf()];
 
             group.throughput(Throughput::Elements(size as u64));
             group.bench_function(BenchmarkId::new(shape, size), |b| {
-                b.to_async(&runtime).iter(|| async {
-                    let scan = scan_directory(&deps, temp.path(), &marker_files, SEARCH_DEPTH)
-                        .await
-                        .expect("scan the tree");
+                b.iter(|| {
+                    let scan = scan_directories(&dirs, &marker_files, SEARCH_DEPTH);
                     black_box((scan.git_repos, scan.marker_files))
                 });
             });
@@ -72,9 +68,6 @@ pub fn benchmark_scan(c: &mut Criterion) {
 }
 
 pub fn benchmark_discovery(c: &mut Criterion) {
-    let deps = dependencies();
-    let runtime = runtime();
-
     let mut group = c.benchmark_group("discovery");
     tune(&mut group);
 
@@ -86,16 +79,9 @@ pub fn benchmark_discovery(c: &mut Criterion) {
 
             group.throughput(Throughput::Elements(size as u64));
             group.bench_function(BenchmarkId::new(shape, size), |b| {
-                b.to_async(&runtime).iter_batched(
-                    || ProjectFinder::new(config.clone(), deps.clone()),
-                    |finder| async move {
-                        black_box(
-                            finder
-                                .find_project_details()
-                                .await
-                                .expect("search the tree"),
-                        )
-                    },
+                b.iter_batched(
+                    || ProjectFinder::new(config.clone()),
+                    |finder| black_box(finder.find_project_details().expect("search the tree")),
                     BatchSize::PerIteration,
                 );
             });
@@ -103,14 +89,6 @@ pub fn benchmark_discovery(c: &mut Criterion) {
     }
 
     group.finish();
-}
-
-fn dependencies() -> Dependencies {
-    Dependencies::check().expect("`fd` has to be on PATH to benchmark discovery")
-}
-
-fn runtime() -> Runtime {
-    Runtime::new().expect("build a tokio runtime")
 }
 
 fn defaults() -> Config {

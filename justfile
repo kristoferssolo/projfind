@@ -24,7 +24,7 @@ fmt-check:
 clippy:
     cargo clippy --workspace --all-features --all-targets -- --deny warnings
 
-# Requires `fd` on PATH.
+# Run the test suite.
 test *ARGS:
     cargo nextest run --all-features {{ ARGS }}
 
@@ -41,7 +41,7 @@ install:
     cargo install --path . --locked
 
 # Benchmark. Pass a group or benchmark name to narrow the run, for example
-# `just bench ranking`. The scan and discovery groups need `fd` on PATH.
+# `just bench ranking`. The scan and discovery groups walk real temporary trees.
 bench *ARGS:
     cargo bench --bench benchmark -- {{ ARGS }}
 

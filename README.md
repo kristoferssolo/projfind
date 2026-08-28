@@ -6,8 +6,8 @@ Find coding projects below one or more directories. `mekle` recognizes Git
 repositories and common markers such as `Cargo.toml`, `package.json`, and
 `pyproject.toml`, then prints project roots ordered by recent and frequent use.
 
-It respects ignore files, skips `.git` contents, and requires
-[`fd`](https://github.com/sharkdp/fd) (`fdfind` on Debian and Ubuntu).
+It respects ignore files, skips `.git` contents, and needs nothing installed
+beyond the binary itself.
 
 ## Install
 
