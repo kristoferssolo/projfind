@@ -1,146 +1,105 @@
-use crate::{
-    dependencies::Dependencies,
-    errors::{ProjectFinderError, Result},
-};
-use regex::escape;
-use std::{
-    ffi::OsString,
-    iter::once,
-    path::{Path, PathBuf},
-    process::Stdio,
-};
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    process::Command,
-};
+use ignore::{WalkBuilder, WalkState};
+use std::{collections::HashSet, path::PathBuf, sync::Mutex};
 use tracing::{debug, warn};
 
 const GIT_DIR: &str = ".git";
+const POISONED: &str = "scan lock poisoned";
 
+/// Everything one walk found: repository roots and paths to marker files.
+#[derive(Debug, Default)]
 pub struct DirectoryScan {
     pub git_repos: Vec<PathBuf>,
     pub marker_files: Vec<PathBuf>,
 }
 
-/// Scans a directory for repositories and marker files.
+/// Walks every directory in `dirs` at once, collecting repositories and any
+/// file or directory named after one of `marker_names`.
 ///
-/// # Errors
+/// Hidden entries are visited, symlinks are followed, and ignore files are
+/// honoured. Repositories are never descended into, so a marker inside `.git`
+/// cannot masquerade as a project. Entries that cannot be read are logged and
+/// skipped rather than failing the whole walk.
 ///
-/// Returns an error if `fd` cannot run or its output cannot be read.
-pub async fn scan_directory(
-    deps: &Dependencies,
-    dir: &Path,
+/// # Panics
+///
+/// Panics if a walker thread panicked while holding the result lock.
+#[must_use]
+pub fn scan_directories(
+    dirs: &[PathBuf],
     marker_names: &[String],
     max_depth: usize,
-) -> Result<DirectoryScan> {
-    let mut cmd = Command::new(&deps.fd_path);
-    cmd.arg("--hidden")
-        .arg("--follow")
-        .arg("--prune")
-        .arg("--type")
-        .arg("d")
-        .arg("--type")
-        .arg("f")
-        .arg("--max-depth")
-        .arg(max_depth.to_string())
-        .arg("--print0")
-        .arg(search_pattern(marker_names))
-        .arg(dir)
-        .stdout(Stdio::piped());
-
-    debug!("Scanning {}", dir.display());
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|error| ProjectFinderError::command(&deps.fd_path, error))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| ProjectFinderError::MissingStdout {
-            binary: deps.fd_path.clone(),
-        })?;
-    let mut reader = BufReader::new(stdout);
-    let mut scan = DirectoryScan {
-        git_repos: Vec::new(),
-        marker_files: Vec::new(),
+) -> DirectoryScan {
+    let Some((first, rest)) = dirs.split_first() else {
+        return DirectoryScan::default();
     };
 
-    let mut record = Vec::new();
-    while reader
-        .read_until(b'\0', &mut record)
-        .await
-        .map_err(|error| ProjectFinderError::command(&deps.fd_path, error))?
-        != 0
-    {
-        if record.last() == Some(&0) {
-            record.pop();
-        }
-        scan.classify(PathBuf::from(os_string_from_bytes(std::mem::take(
-            &mut record,
-        ))));
+    let mut builder = WalkBuilder::new(first);
+    debug!("Scanning {}", first.display());
+    for dir in rest {
+        debug!("Scanning {}", dir.display());
+        builder.add(dir);
     }
+    builder
+        .hidden(false)
+        .follow_links(true)
+        .max_depth(Some(max_depth));
 
-    let status = child
-        .wait()
-        .await
-        .map_err(|error| ProjectFinderError::command(&deps.fd_path, error))?;
-    if !status.success() {
-        warn!("fd search exited with {status}");
-    }
+    let markers = marker_names
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let scan = Mutex::new(DirectoryScan::default());
 
-    Ok(scan)
-}
+    builder.build_parallel().run(|| {
+        Box::new(|entry| {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    warn!("Skipping unreadable entry: {error}");
+                    return WalkState::Continue;
+                }
+            };
 
-#[cfg(unix)]
-fn os_string_from_bytes(bytes: Vec<u8>) -> OsString {
-    use std::os::unix::ffi::OsStringExt;
-
-    OsString::from_vec(bytes)
-}
-
-#[cfg(not(unix))]
-fn os_string_from_bytes(bytes: Vec<u8>) -> OsString {
-    String::from_utf8_lossy(&bytes).into_owned().into()
-}
-
-fn search_pattern(marker_names: &[String]) -> String {
-    let alternatives = once(escape(GIT_DIR))
-        .chain(marker_names.iter().map(|name| escape(name)))
-        .collect::<Vec<_>>()
-        .join("|");
-
-    format!("^({alternatives})$")
-}
-
-impl DirectoryScan {
-    fn classify(&mut self, path: PathBuf) {
-        if path.file_name().is_some_and(|name| name == GIT_DIR) {
-            if path.is_dir()
-                && let Some(parent) = path.parent()
-            {
-                self.git_repos.push(parent.to_path_buf());
+            // Depth zero is a search root, which never matches itself.
+            if entry.depth() == 0 {
+                return WalkState::Continue;
             }
-            return;
-        }
+            let Some(file_type) = entry.file_type() else {
+                return WalkState::Continue;
+            };
+            if !file_type.is_dir() && !file_type.is_file() {
+                return WalkState::Continue;
+            }
 
-        self.marker_files.push(path);
-    }
-}
+            let name = entry.file_name();
+            if name == GIT_DIR {
+                // A `.git` file points at a worktree elsewhere; only the
+                // directory marks a repository.
+                if !file_type.is_dir() {
+                    return WalkState::Continue;
+                }
+                if let Some(parent) = entry.path().parent() {
+                    scan.lock()
+                        .expect(POISONED)
+                        .git_repos
+                        .push(parent.to_path_buf());
+                }
+                return WalkState::Skip;
+            }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+            if name.to_str().is_some_and(|name| markers.contains(name)) {
+                scan.lock()
+                    .expect(POISONED)
+                    .marker_files
+                    .push(entry.into_path());
+                if file_type.is_dir() {
+                    return WalkState::Skip;
+                }
+            }
 
-    #[test]
-    fn the_pattern_always_looks_for_repositories() {
-        assert_eq!(search_pattern(&[]), r"^(\.git)$");
-    }
+            WalkState::Continue
+        })
+    });
 
-    #[test]
-    fn marker_names_are_escaped_into_the_alternation() {
-        assert_eq!(
-            search_pattern(&["Cargo.toml".to_owned(), "go.mod".to_owned()]),
-            r"^(\.git|Cargo\.toml|go\.mod)$"
-        );
-    }
+    scan.into_inner().expect(POISONED)
 }

@@ -24,7 +24,7 @@ fmt-check:
 clippy:
     cargo clippy --workspace --all-features --all-targets -- --deny warnings
 
-# Requires `fd` on PATH.
+# Run the test suite.
 test *ARGS:
     cargo nextest run --all-features {{ ARGS }}
 
@@ -40,7 +40,7 @@ run *ARGS:
 install:
     cargo install --path . --locked
 
-# Benchmark. Requires `fd` on PATH, as the discovery group runs a real scan.
+# Benchmark. The discovery group runs a real scan against temporary trees.
 bench *ARGS:
     cargo bench --bench benchmark -- {{ ARGS }}
 

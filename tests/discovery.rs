@@ -1,8 +1,6 @@
 use claims::assert_err;
 use color_eyre::eyre::{Result, eyre};
-use mekle::{
-    config::Config, dependencies::Dependencies, errors::ProjectFinderError, finder::ProjectFinder,
-};
+use mekle::{config::Config, errors::ProjectFinderError, finder::ProjectFinder};
 use std::{
     fs::{create_dir_all, write},
     os::unix::fs::symlink,
@@ -19,10 +17,8 @@ fn config_for(root: &Path) -> Result<Config> {
     Ok(config)
 }
 
-async fn search(root: &Path, config: Config) -> Result<Vec<PathBuf>> {
-    let projects = ProjectFinder::new(config, Dependencies::check()?)
-        .find_projects()
-        .await?;
+fn search(root: &Path, config: Config) -> Result<Vec<PathBuf>> {
+    let projects = ProjectFinder::new(config).find_projects()?;
 
     projects
         .iter()
@@ -35,8 +31,8 @@ async fn search(root: &Path, config: Config) -> Result<Vec<PathBuf>> {
         .collect()
 }
 
-async fn projects_in(root: &Path) -> Result<Vec<PathBuf>> {
-    search(root, config_for(root)?).await
+fn projects_in(root: &Path) -> Result<Vec<PathBuf>> {
+    search(root, config_for(root)?)
 }
 
 fn expect(paths: &[&str]) -> Vec<PathBuf> {
@@ -57,49 +53,43 @@ fn file(path: &Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn repositories_and_marker_directories_are_both_projects() -> Result<()> {
+#[test]
+fn repositories_and_marker_directories_are_both_projects() -> Result<()> {
     let temp = TempDir::new()?;
     repository(&temp.path().join("cloned"))?;
     file(&temp.path().join("manifest/go.mod"), "module example\n")?;
     file(&temp.path().join("neither/README.md"), "not a project")?;
 
-    assert_eq!(
-        projects_in(temp.path()).await?,
-        expect(&["cloned", "manifest"])
-    );
+    assert_eq!(projects_in(temp.path())?, expect(&["cloned", "manifest"]));
     Ok(())
 }
 
-#[tokio::test]
-async fn a_git_file_is_not_a_repository() -> Result<()> {
+#[test]
+fn a_git_file_is_not_a_repository() -> Result<()> {
     let temp = TempDir::new()?;
     file(
         &temp.path().join("worktree/.git"),
         "gitdir: /elsewhere/.git\n",
     )?;
 
-    let projects = projects_in(temp.path()).await?;
+    let projects = projects_in(temp.path())?;
 
     assert!(projects.is_empty(), "unexpectedly found {projects:?}");
     Ok(())
 }
 
-#[tokio::test]
-async fn nested_repositories_are_reported_separately() -> Result<()> {
+#[test]
+fn nested_repositories_are_reported_separately() -> Result<()> {
     let temp = TempDir::new()?;
     repository(temp.path())?;
     repository(&temp.path().join("vendor/inner"))?;
 
-    assert_eq!(
-        projects_in(temp.path()).await?,
-        expect(&["", "vendor/inner"])
-    );
+    assert_eq!(projects_in(temp.path())?, expect(&["", "vendor/inner"]));
     Ok(())
 }
 
-#[tokio::test]
-async fn git_directories_are_not_searched_for_markers() -> Result<()> {
+#[test]
+fn git_directories_are_not_searched_for_markers() -> Result<()> {
     let temp = TempDir::new()?;
     repository(&temp.path().join("repo"))?;
     file(
@@ -107,12 +97,12 @@ async fn git_directories_are_not_searched_for_markers() -> Result<()> {
         "[package]\nname = \"dep\"\n",
     )?;
 
-    assert_eq!(projects_in(temp.path()).await?, expect(&["repo"]));
+    assert_eq!(projects_in(temp.path())?, expect(&["repo"]));
     Ok(())
 }
 
-#[tokio::test]
-async fn a_cargo_workspace_reports_only_its_root() -> Result<()> {
+#[test]
+fn a_cargo_workspace_reports_only_its_root() -> Result<()> {
     let temp = TempDir::new()?;
     repository(temp.path())?;
     file(
@@ -128,12 +118,12 @@ async fn a_cargo_workspace_reports_only_its_root() -> Result<()> {
         "[package]\nname = \"two\"\n",
     )?;
 
-    assert_eq!(projects_in(temp.path()).await?, expect(&[""]));
+    assert_eq!(projects_in(temp.path())?, expect(&[""]));
     Ok(())
 }
 
-#[tokio::test]
-async fn a_cargo_workspace_absorbs_members_without_a_repository() -> Result<()> {
+#[test]
+fn a_cargo_workspace_absorbs_members_without_a_repository() -> Result<()> {
     let temp = TempDir::new()?;
     file(
         &temp.path().join("Cargo.toml"),
@@ -144,12 +134,12 @@ async fn a_cargo_workspace_absorbs_members_without_a_repository() -> Result<()> 
         "[package]\nname = \"one\"\n",
     )?;
 
-    assert_eq!(projects_in(temp.path()).await?, expect(&[""]));
+    assert_eq!(projects_in(temp.path())?, expect(&[""]));
     Ok(())
 }
 
-#[tokio::test]
-async fn package_json_workspaces_absorb_their_members() -> Result<()> {
+#[test]
+fn package_json_workspaces_absorb_their_members() -> Result<()> {
     let temp = TempDir::new()?;
     file(
         &temp.path().join("package.json"),
@@ -164,12 +154,12 @@ async fn package_json_workspaces_absorb_their_members() -> Result<()> {
         r#"{"name": "api"}"#,
     )?;
 
-    assert_eq!(projects_in(temp.path()).await?, expect(&[""]));
+    assert_eq!(projects_in(temp.path())?, expect(&[""]));
     Ok(())
 }
 
-#[tokio::test]
-async fn a_configured_workspace_file_absorbs_members() -> Result<()> {
+#[test]
+fn a_configured_workspace_file_absorbs_members() -> Result<()> {
     let temp = TempDir::new()?;
     file(
         &temp.path().join("pnpm-workspace.yaml"),
@@ -180,12 +170,12 @@ async fn a_configured_workspace_file_absorbs_members() -> Result<()> {
         r#"{"name": "ui"}"#,
     )?;
 
-    assert_eq!(projects_in(temp.path()).await?, expect(&[""]));
+    assert_eq!(projects_in(temp.path())?, expect(&[""]));
     Ok(())
 }
 
-#[tokio::test]
-async fn a_direct_child_is_a_project_but_a_grandchild_is_not() -> Result<()> {
+#[test]
+fn a_direct_child_is_a_project_but_a_grandchild_is_not() -> Result<()> {
     let temp = TempDir::new()?;
     file(&temp.path().join("service/go.mod"), "module service\n")?;
     file(&temp.path().join("service/tool/go.mod"), "module tool\n")?;
@@ -195,38 +185,38 @@ async fn a_direct_child_is_a_project_but_a_grandchild_is_not() -> Result<()> {
     )?;
 
     assert_eq!(
-        projects_in(temp.path()).await?,
+        projects_in(temp.path())?,
         expect(&["service", "service/tool"])
     );
     Ok(())
 }
 
-#[tokio::test]
-async fn build_files_resolve_to_the_outermost_one() -> Result<()> {
+#[test]
+fn build_files_resolve_to_the_outermost_one() -> Result<()> {
     let temp = TempDir::new()?;
     file(&temp.path().join("Makefile"), "all:\n")?;
     file(&temp.path().join("lib/Makefile"), "all:\n")?;
     file(&temp.path().join("lib/codec/Makefile"), "all:\n")?;
 
-    assert_eq!(projects_in(temp.path()).await?, expect(&[""]));
+    assert_eq!(projects_in(temp.path())?, expect(&[""]));
     Ok(())
 }
 
-#[tokio::test]
-async fn symlinked_directories_are_followed() -> Result<()> {
+#[test]
+fn symlinked_directories_are_followed() -> Result<()> {
     let temp = TempDir::new()?;
     repository(&temp.path().join("actual/checkout"))?;
     symlink("actual", temp.path().join("linked"))?;
 
     assert_eq!(
-        projects_in(temp.path()).await?,
+        projects_in(temp.path())?,
         expect(&["actual/checkout", "linked/checkout"])
     );
     Ok(())
 }
 
-#[tokio::test]
-async fn the_depth_limit_bounds_the_search() -> Result<()> {
+#[test]
+fn the_depth_limit_bounds_the_search() -> Result<()> {
     let temp = TempDir::new()?;
     repository(&temp.path().join("near"))?;
     repository(&temp.path().join("one/two/far"))?;
@@ -234,12 +224,12 @@ async fn the_depth_limit_bounds_the_search() -> Result<()> {
     let mut config = config_for(temp.path())?;
     config.depth = 2;
 
-    assert_eq!(search(temp.path(), config).await?, expect(&["near"]));
+    assert_eq!(search(temp.path(), config)?, expect(&["near"]));
     Ok(())
 }
 
-#[tokio::test]
-async fn max_results_keeps_the_first_roots_in_order() -> Result<()> {
+#[test]
+fn max_results_keeps_the_first_roots_in_order() -> Result<()> {
     let temp = TempDir::new()?;
     for name in ["charlie", "alpha", "bravo"] {
         repository(&temp.path().join(name))?;
@@ -248,15 +238,12 @@ async fn max_results_keeps_the_first_roots_in_order() -> Result<()> {
     let mut config = config_for(temp.path())?;
     config.max_results = Some(2.try_into()?);
 
-    assert_eq!(
-        search(temp.path(), config).await?,
-        expect(&["alpha", "bravo"])
-    );
+    assert_eq!(search(temp.path(), config)?, expect(&["alpha", "bravo"]));
     Ok(())
 }
 
-#[tokio::test]
-async fn several_search_paths_are_merged() -> Result<()> {
+#[test]
+fn several_search_paths_are_merged() -> Result<()> {
     let first = TempDir::new()?;
     let second = TempDir::new()?;
     repository(&first.path().join("from-first"))?;
@@ -265,9 +252,7 @@ async fn several_search_paths_are_merged() -> Result<()> {
     let mut config = config_for(first.path())?;
     config.paths = vec![first.path().to_path_buf(), second.path().to_path_buf()];
 
-    let projects = ProjectFinder::new(config, Dependencies::check()?)
-        .find_projects()
-        .await?;
+    let projects = ProjectFinder::new(config).find_projects()?;
 
     let mut expected = vec![
         first.path().join("from-first"),
@@ -279,19 +264,15 @@ async fn several_search_paths_are_merged() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn a_search_path_that_is_not_a_directory_fails() -> Result<()> {
+#[test]
+fn a_search_path_that_is_not_a_directory_fails() -> Result<()> {
     let temp = TempDir::new()?;
     let missing = temp.path().join("nowhere");
 
     let mut config = config_for(temp.path())?;
     config.paths = vec![missing.clone()];
 
-    let error = assert_err!(
-        ProjectFinder::new(config, Dependencies::check()?)
-            .find_projects()
-            .await
-    );
+    let error = assert_err!(ProjectFinder::new(config).find_projects());
 
     assert!(
         matches!(&error, ProjectFinderError::PathNotFound(path) if *path == missing),

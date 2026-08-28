@@ -5,7 +5,6 @@ use color_eyre::{
 use mekle::{
     completions,
     config::{Config, HistoryCommand, Invocation, cli_command, contract_tilde, home},
-    dependencies::Dependencies,
     errors::ProjectFinderError,
     finder::{ProjectFinder, root::RootResolver},
     history::{History, HistoryEntry, ScoreChange, history_file_path},
@@ -19,15 +18,14 @@ use std::{
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     HookBuilder::default()
         .display_location_section(false)
         .display_env_section(false)
         .install()?;
 
     match Invocation::load().wrap_err("Failed to load arguments")? {
-        Invocation::Find(config) => find_projects(config).await,
+        Invocation::Find(config) => find_projects(config),
         Invocation::Completions(shell) => {
             completions::generate(shell, &mut cli_command(), &mut stdout())?;
             Ok(())
@@ -52,7 +50,7 @@ fn manage_history(command: HistoryCommand) -> Result<()> {
                 .entries()?
                 .into_iter()
                 .find(|entry| entry.path == path)
-                .ok_or_else(|| ProjectFinderError::HistoryEntryNotFound(path))?;
+                .ok_or(ProjectFinderError::HistoryEntryNotFound(path))?;
             print_entries([entry]);
         }
         HistoryCommand::Set { path, score } => {
@@ -97,16 +95,14 @@ fn format_age(age: std::time::Duration) -> String {
     }
 }
 
-async fn find_projects(mut config: Config) -> Result<()> {
+fn find_projects(mut config: Config) -> Result<()> {
     init_logging(config.verbose).wrap_err("Failed to set up logging")?;
 
     // Ranking needs the complete result set before applying the output limit.
     let max_results = config.max_results.take();
     let output_format = config.output;
-    let deps = Dependencies::check()?;
-    let projects = ProjectFinder::new(config, deps)
+    let projects = ProjectFinder::new(config)
         .find_project_details()
-        .await
         .wrap_err("Failed to find projects")?;
     let history = history_file_path()
         .map(History::open)

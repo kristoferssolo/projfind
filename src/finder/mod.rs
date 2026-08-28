@@ -3,20 +3,15 @@ pub mod root;
 use self::root::RootResolver;
 use crate::{
     config::Config,
-    dependencies::Dependencies,
     errors::{ProjectFinderError, Result},
-    scan::{DirectoryScan, scan_directory},
+    scan::{DirectoryScan, scan_directories},
 };
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     hash::BuildHasher,
     path::{Path, PathBuf},
-    sync::Arc,
 };
-use tokio::{spawn, sync::Semaphore};
-use tracing::{debug, info};
-
-const MAX_CONCURRENT_SEARCHES: usize = 8;
+use tracing::info;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
@@ -36,18 +31,16 @@ pub fn is_covered<S: BuildHasher>(candidate: &Path, known: &HashSet<PathBuf, S>)
 #[derive(Debug)]
 pub struct ProjectFinder {
     config: Config,
-    deps: Dependencies,
     root_resolver: RootResolver,
 }
 
 impl ProjectFinder {
     #[must_use]
-    pub fn new(config: Config, deps: Dependencies) -> Self {
+    pub fn new(config: Config) -> Self {
         let root_resolver = RootResolver::from_config(&config);
 
         Self {
             config,
-            deps,
             root_resolver,
         }
     }
@@ -56,10 +49,10 @@ impl ProjectFinder {
     ///
     /// # Errors
     ///
-    /// Returns an error if no configured directory can be searched.
-    pub async fn find_projects(&self) -> Result<Vec<PathBuf>> {
+    /// Returns an error if a configured path is not a directory, or if a
+    /// marker cannot be resolved to a project root.
+    pub fn find_projects(&self) -> Result<Vec<PathBuf>> {
         self.find_project_details()
-            .await
             .map(|projects| projects.into_iter().map(|project| project.path).collect())
     }
 
@@ -67,21 +60,19 @@ impl ProjectFinder {
     ///
     /// # Errors
     ///
-    /// Returns an error if no configured directory can be searched.
-    pub async fn find_project_details(&self) -> Result<Vec<Project>> {
-        let scans = self.scan_all().await?;
+    /// Returns an error if a configured path is not a directory, or if a
+    /// marker cannot be resolved to a project root.
+    pub fn find_project_details(&self) -> Result<Vec<Project>> {
+        let scan = self.scan()?;
 
-        let mut project_paths = scans
-            .iter()
-            .flat_map(|scan| scan.git_repos.iter().cloned())
-            .collect::<HashSet<_>>();
+        let mut project_paths = scan.git_repos.iter().cloned().collect::<HashSet<_>>();
         let mut markers = project_paths
             .iter()
             .cloned()
             .map(|path| (path, BTreeSet::from([".git".to_owned()])))
             .collect::<HashMap<_, _>>();
 
-        let mut candidates = self.resolve_marker_roots(&scans)?;
+        let mut candidates = self.resolve_marker_roots(&scan)?;
         candidates.sort_unstable();
         candidates.dedup();
 
@@ -116,10 +107,7 @@ impl ProjectFinder {
         Ok(projects)
     }
 
-    async fn scan_all(&self) -> Result<Vec<DirectoryScan>> {
-        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_SEARCHES));
-        let mut handles = Vec::with_capacity(self.config.paths.len());
-
+    fn scan(&self) -> Result<DirectoryScan> {
         for path in &self.config.paths {
             if !path.is_dir() {
                 return Err(ProjectFinderError::PathNotFound(path.clone()));
@@ -128,55 +116,18 @@ impl ProjectFinder {
             if self.config.verbose {
                 info!("Searching in: {}", path.display());
             }
-
-            let deps = self.deps.clone();
-            let marker_files = self.config.marker_files.clone();
-            let depth = self.config.depth;
-            let path = path.clone();
-            let semaphore = Arc::clone(&semaphore);
-
-            handles.push((
-                path.clone(),
-                spawn(async move {
-                    let _permit = semaphore.acquire().await.map_err(|source| {
-                        ProjectFinderError::Scheduling {
-                            path: path.clone(),
-                            source,
-                        }
-                    })?;
-                    scan_directory(&deps, &path, &marker_files, depth).await
-                }),
-            ));
         }
 
-        let mut scans = Vec::with_capacity(handles.len());
-        let mut errors = Vec::new();
-        for (path, handle) in handles {
-            let error = match handle.await {
-                Ok(Ok(scan)) => {
-                    scans.push(scan);
-                    continue;
-                }
-                Ok(Err(error)) => error,
-                Err(source) => ProjectFinderError::TaskFailed { path, source },
-            };
-            debug!("Search task failed: {error}");
-            errors.push(error);
-        }
-
-        if errors.len() == self.config.paths.len()
-            && let Some(error) = errors.into_iter().next()
-        {
-            return Err(error);
-        }
-
-        Ok(scans)
+        Ok(scan_directories(
+            &self.config.paths,
+            &self.config.marker_files,
+            self.config.depth,
+        ))
     }
 
-    fn resolve_marker_roots(&self, scans: &[DirectoryScan]) -> Result<Vec<(PathBuf, String)>> {
-        scans
+    fn resolve_marker_roots(&self, scan: &DirectoryScan) -> Result<Vec<(PathBuf, String)>> {
+        scan.marker_files
             .iter()
-            .flat_map(|scan| scan.marker_files.iter())
             .filter_map(|marker| {
                 let dir = marker.parent()?;
                 let name = marker.file_name()?.to_str()?;
