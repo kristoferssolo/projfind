@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 use std::{
     env,
     ffi::OsString,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 /// The directory mekle owns inside a base directory.
@@ -91,16 +91,49 @@ pub fn contract_tilde(path: &Path, home: Option<&Path>) -> PathBuf {
 ///
 /// Returns an error if `path` cannot be resolved.
 pub fn normalize(path: &Path) -> Result<PathBuf> {
-    let resolved = if exists_now(path) {
-        std::fs::canonicalize(path)
-    } else {
-        std::path::absolute(path)
-    };
+    let absolute = std::path::absolute(path).map_err(|source| Error::ResolvePath {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let resolved = resolve_from_existing_prefix(&absolute);
 
     resolved.map_err(|source| Error::ResolvePath {
         path: path.to_path_buf(),
         source,
     })
+}
+
+/// Canonicalizes the existing prefix, then resolves components in the missing
+/// suffix without consulting the filesystem.
+fn resolve_from_existing_prefix(path: &Path) -> std::io::Result<PathBuf> {
+    let mut prefix = path;
+    let mut suffix = Vec::new();
+
+    while !exists_now(prefix) {
+        let Some(component) = prefix.components().next_back() else {
+            break;
+        };
+        suffix.push(component);
+        let Some(parent) = prefix.parent() else {
+            break;
+        };
+        prefix = parent;
+    }
+
+    let mut resolved = std::fs::canonicalize(prefix)?;
+    for component in suffix.into_iter().rev() {
+        match component {
+            Component::Prefix(prefix) => resolved.push(prefix.as_os_str()),
+            Component::RootDir => resolved.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                resolved.pop();
+            }
+            Component::Normal(part) => resolved.push(part),
+        }
+    }
+
+    Ok(resolved)
 }
 
 /// A path that cannot be inspected is treated as absent, leaving the caller to
@@ -112,7 +145,7 @@ fn exists_now(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claims::{assert_none, assert_ok};
+    use claims::{assert_none, assert_ok, assert_ok_eq};
     use rstest::rstest;
     use tempfile::TempDir;
 
@@ -233,5 +266,13 @@ mod tests {
         let absent = temp.path().join("absent");
 
         assert_ok!(normalize(&absent));
+    }
+
+    #[test]
+    fn a_missing_path_resolves_parent_components() {
+        let temp = TempDir::new().expect("create temp dir");
+        let path = temp.path().join("missing/../project");
+
+        assert_ok_eq!(normalize(&path), temp.path().join("project"));
     }
 }
