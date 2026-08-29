@@ -1,15 +1,15 @@
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    fs,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     env,
     ffi::OsString,
-    fs::{self, File},
-    io::{ErrorKind, Write},
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tempfile::NamedTempFile;
 
 const HISTORY_VERSION: u8 = 1;
 const MAX_TOTAL_SCORE: f64 = 10_000.0;
@@ -84,16 +84,13 @@ impl History {
     /// Returns an error when an existing history cannot be read or parsed.
     pub fn open(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
-        let contents = match fs::read_to_string(&path) {
-            Ok(contents) => contents,
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                return Ok(Self {
-                    path,
-                    projects: Vec::new(),
-                });
-            }
-            Err(error) => return Err(Error::read_file(&path, error)),
+        let Some(contents) = fs::read(&path)? else {
+            return Ok(Self {
+                path,
+                projects: Vec::new(),
+            });
         };
+
         let stored =
             toml::from_str::<StoredHistory>(&contents).map_err(|source| Error::ParseHistory {
                 path: path.clone(),
@@ -213,21 +210,17 @@ impl History {
     ///
     /// Returns an error when a path cannot be checked or the history cannot be written.
     pub fn prune(&mut self) -> Result<()> {
-        let exists = self
+        // Collected up front so a failed check leaves the history untouched.
+        let existing = self
             .projects
             .iter()
-            .map(|project| {
-                project
-                    .path
-                    .try_exists()
-                    .map_err(|source| Error::read_file(&project.path, source))
-            })
+            .map(|project| fs::exists(&project.path))
             .collect::<Result<Vec<_>>>()?;
 
         self.projects = self
             .projects
             .drain(..)
-            .zip(exists)
+            .zip(existing)
             .filter_map(|(project, exists)| exists.then_some(project))
             .collect();
         self.save()
@@ -303,17 +296,8 @@ impl History {
         };
         let contents =
             toml::to_string_pretty(&stored).map_err(|source| Error::SerializeHistory { source })?;
-        let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
-        fs::create_dir_all(parent).map_err(|source| Error::write_file(parent, source))?;
-        let mut temp = NamedTempFile::new_in(parent)
-            .map_err(|source| Error::write_file(&self.path, source))?;
-        temp.write_all(contents.as_bytes())
-            .and_then(|()| temp.as_file_mut().sync_all())
-            .map_err(|source| Error::write_file(&self.path, source))?;
-        temp.persist(&self.path)
-            .map_err(|error| Error::write_file(&self.path, error.error))?;
-        sync_parent(parent).map_err(|source| Error::write_file(parent, source))?;
-        Ok(())
+
+        fs::write_atomic(&self.path, &contents)
     }
 }
 
@@ -355,16 +339,6 @@ fn unix_timestamp(time: SystemTime) -> Result<u64> {
     time.duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .map_err(|source| Error::InvalidSystemTime { source })
-}
-
-#[cfg(unix)]
-fn sync_parent(parent: &Path) -> std::io::Result<()> {
-    File::open(parent)?.sync_all()
-}
-
-#[cfg(not(unix))]
-fn sync_parent(_parent: &Path) -> std::io::Result<()> {
-    Ok(())
 }
 
 #[cfg(test)]

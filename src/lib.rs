@@ -2,6 +2,7 @@ pub mod completions;
 pub mod config;
 pub mod error;
 pub mod finder;
+pub mod fs;
 pub mod git;
 pub mod history;
 pub mod output;

@@ -1,12 +1,11 @@
 use crate::completions::CompletionShell;
 use crate::error::{Error, Result};
+use crate::fs;
 use clap::{CommandFactory, Parser, Subcommand};
 use serde::Deserialize;
 use std::{
     env,
     ffi::OsString,
-    fs,
-    io::ErrorKind,
     num::NonZeroUsize,
     path::{Path, PathBuf},
 };
@@ -319,17 +318,14 @@ impl Cli {
 }
 
 fn read_config_file(path: &Path) -> Result<Option<FileConfig>> {
-    let contents = match fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(Error::read_file(path, error)),
-    };
-    let config = toml::from_str(&contents).map_err(|source| Error::ParseConfig {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
-    Ok(Some(config))
+    fs::read(path)?
+        .map(|contents| {
+            toml::from_str(&contents).map_err(|source| Error::ParseConfig {
+                path: path.to_path_buf(),
+                source,
+            })
+        })
+        .transpose()
 }
 
 pub fn home() -> Option<PathBuf> {

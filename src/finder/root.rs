@@ -1,13 +1,12 @@
 use super::is_covered;
 use crate::{
     config::Config,
-    error::{Error, Result},
+    error::Result,
+    fs::{self, content::ContentTest},
     git::{GIT_DIR, marks_repository},
 };
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
-    fs::read_to_string,
-    io::ErrorKind,
     path::{Path, PathBuf},
     sync::RwLock,
 };
@@ -85,11 +84,7 @@ impl RootResolver {
             }
 
             for marker_name in &self.marker_files {
-                let marker = ancestor.join(marker_name);
-                if marker
-                    .try_exists()
-                    .map_err(|source| Error::read_file(&marker, source))?
-                {
+                if fs::exists(&ancestor.join(marker_name))? {
                     candidates.insert(self.resolve(ancestor, marker_name)?);
                 }
             }
@@ -129,7 +124,7 @@ impl RootResolver {
                 ascend_to_root(dir, |parent| self.is_workspace_root(parent))?
             }
             MarkerType::CargoToml => ascend_to_root(dir, |parent| {
-                file_matches(&parent.join("Cargo.toml"), CARGO_WORKSPACE)
+                CARGO_WORKSPACE.matches_file(&parent.join("Cargo.toml"))
             })?,
             MarkerType::BuildFile(name) => ascend_to_highest_build_file(dir, name)?,
             MarkerType::OtherConfig => ascend_to_root(dir, |_| Ok(false))?,
@@ -148,20 +143,7 @@ impl RootResolver {
             return Ok(cached);
         }
 
-        let mut is_root = false;
-        for (file, test) in WORKSPACE_RULES {
-            if file_matches(&dir.join(file), test)? {
-                is_root = true;
-                break;
-            }
-        }
-
-        if !is_root {
-            is_root = self
-                .workspace_files
-                .iter()
-                .any(|file| dir.join(file).exists());
-        }
+        let is_root = self.declares_a_workspace(dir)?;
 
         self.workspace_cache
             .write()
@@ -169,6 +151,24 @@ impl RootResolver {
             .insert(dir.to_path_buf(), is_root);
 
         Ok(is_root)
+    }
+
+    /// Reports whether any known manifest in `dir` declares a workspace, either
+    /// by its contents or by merely being present.
+    fn declares_a_workspace(&self, dir: &Path) -> Result<bool> {
+        for (file, test) in WORKSPACE_RULES {
+            if test.matches_file(&dir.join(file))? {
+                return Ok(true);
+            }
+        }
+
+        for file in &self.workspace_files {
+            if fs::exists(&dir.join(file))? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 }
 
@@ -192,33 +192,6 @@ impl From<&str> for MarkerType {
             }
             _ => Self::OtherConfig,
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ContentTest {
-    ContainsAny(&'static [&'static str]),
-    LineStartsWith(&'static str),
-    NonEmpty,
-}
-
-impl ContentTest {
-    fn matches(self, contents: &str) -> bool {
-        match self {
-            Self::ContainsAny(needles) => needles.iter().any(|needle| contents.contains(needle)),
-            Self::LineStartsWith(prefix) => contents
-                .lines()
-                .any(|line| line.trim_start().starts_with(prefix)),
-            Self::NonEmpty => !contents.trim().is_empty(),
-        }
-    }
-}
-
-fn file_matches(file: &Path, test: ContentTest) -> Result<bool> {
-    match read_to_string(file) {
-        Ok(contents) => Ok(test.matches(&contents)),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(Error::read_file(file, error)),
     }
 }
 
@@ -250,7 +223,7 @@ fn ascend_to_highest_build_file(dir: &Path, build_file: &str) -> Result<PathBuf>
     let mut highest = dir;
 
     for parent in ancestors_above(dir) {
-        if parent.join(build_file).exists() {
+        if fs::exists(&parent.join(build_file))? {
             highest = parent;
         }
 
@@ -278,7 +251,7 @@ mod tests {
     }
 
     fn holds(file: &'static str) -> impl Fn(&Path) -> Result<bool> {
-        move |dir: &Path| Ok(dir.join(file).exists())
+        move |dir: &Path| fs::exists(&dir.join(file))
     }
 
     #[rstest]
@@ -409,29 +382,5 @@ mod tests {
             ascend_to_highest_build_file(dir, "Makefile"),
             dir.to_path_buf()
         );
-    }
-
-    #[test]
-    fn contains_any_matches_a_single_needle() {
-        let test = ContentTest::ContainsAny(&["\"workspaces\"", "\"workspace\""]);
-
-        assert!(test.matches(r#"{"name": "x", "workspaces": ["a"]}"#));
-        assert!(!test.matches(r#"{"name": "x"}"#));
-    }
-
-    #[test]
-    fn line_starts_with_ignores_position_in_file() {
-        let test = ContentTest::LineStartsWith("[workspace]");
-
-        assert!(test.matches("# a comment\n[workspace]\nmembers = []"));
-        assert!(test.matches("[workspace]"));
-        assert!(!test.matches("[workspace.dependencies]\n"));
-        assert!(!test.matches("[package]\nname = \"x\""));
-    }
-
-    #[test]
-    fn non_empty_ignores_whitespace_only_files() {
-        assert!(ContentTest::NonEmpty.matches("{}"));
-        assert!(!ContentTest::NonEmpty.matches("  \n\t\n"));
     }
 }
