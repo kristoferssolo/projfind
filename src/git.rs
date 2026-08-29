@@ -1,4 +1,4 @@
-use crate::errors::{ProjectFinderError, Result};
+use crate::error::{Error, Result};
 use std::{
     fs::{metadata, read_to_string},
     io::ErrorKind,
@@ -28,7 +28,7 @@ pub fn marks_repository(git_path: &Path) -> Result<bool> {
         Ok(entry) if entry.is_file() => links_to_repository(git_path),
         Ok(_) => Ok(false),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(ProjectFinderError::read_file(git_path, error)),
+        Err(error) => Err(Error::read_file(git_path, error)),
     }
 }
 
@@ -37,7 +37,7 @@ fn links_to_repository(git_file: &Path) -> Result<bool> {
         Ok(contents) => contents,
         // A redirection file is short text; binary contents cannot be one.
         Err(error) if error.kind() == ErrorKind::InvalidData => return Ok(false),
-        Err(error) => return Err(ProjectFinderError::read_file(git_file, error)),
+        Err(error) => return Err(Error::read_file(git_file, error)),
     };
 
     let Some(target) = link_target(&contents).and_then(|target| resolve(git_file, target)) else {
@@ -72,7 +72,7 @@ fn is_dir(target: &Path) -> Result<bool> {
     match metadata(target) {
         Ok(entry) => Ok(entry.is_dir()),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(ProjectFinderError::read_file(target, error)),
+        Err(error) => Err(Error::read_file(target, error)),
     }
 }
 

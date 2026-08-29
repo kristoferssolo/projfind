@@ -1,5 +1,5 @@
 use crate::completions::CompletionShell;
-use crate::errors::{ProjectFinderError, Result};
+use crate::error::{Error, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 use serde::Deserialize;
 use std::{
@@ -221,8 +221,7 @@ impl Config {
     ///
     /// Returns an error if the embedded TOML is invalid.
     pub fn defaults() -> Result<Self> {
-        toml::from_str(DEFAULT_CONFIG)
-            .map_err(|source| ProjectFinderError::ParseDefaultConfig { source })
+        toml::from_str(DEFAULT_CONFIG).map_err(|source| Error::ParseDefaultConfig { source })
     }
 
     fn from_sources(cli: Cli, path: Option<&Path>) -> Result<Self> {
@@ -323,9 +322,9 @@ fn read_config_file(path: &Path) -> Result<Option<FileConfig>> {
     let contents = match fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(ProjectFinderError::read_file(path, error)),
+        Err(error) => return Err(Error::read_file(path, error)),
     };
-    let config = toml::from_str(&contents).map_err(|source| ProjectFinderError::ParseConfig {
+    let config = toml::from_str(&contents).map_err(|source| Error::ParseConfig {
         path: path.to_path_buf(),
         source,
     })?;

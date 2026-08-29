@@ -1,4 +1,4 @@
-use crate::errors::{ProjectFinderError, Result};
+use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -92,16 +92,15 @@ impl History {
                     projects: Vec::new(),
                 });
             }
-            Err(error) => return Err(ProjectFinderError::read_file(&path, error)),
+            Err(error) => return Err(Error::read_file(&path, error)),
         };
-        let stored = toml::from_str::<StoredHistory>(&contents).map_err(|source| {
-            ProjectFinderError::ParseHistory {
+        let stored =
+            toml::from_str::<StoredHistory>(&contents).map_err(|source| Error::ParseHistory {
                 path: path.clone(),
                 source,
-            }
-        })?;
+            })?;
         if stored.version != HISTORY_VERSION {
-            return Err(ProjectFinderError::UnsupportedHistoryVersion {
+            return Err(Error::UnsupportedHistoryVersion {
                 path,
                 version: stored.version,
             });
@@ -178,10 +177,9 @@ impl History {
             }
             ScoreChange::Adjust(delta) => {
                 if !delta.is_finite() {
-                    return Err(ProjectFinderError::InvalidScore(delta));
+                    return Err(Error::InvalidScore(delta));
                 }
-                let position = position
-                    .ok_or_else(|| ProjectFinderError::HistoryEntryNotFound(path.into()))?;
+                let position = position.ok_or_else(|| Error::HistoryEntryNotFound(path.into()))?;
                 let score = self.projects[position].score + delta;
                 if score < 1.0 {
                     self.projects.remove(position);
@@ -191,8 +189,7 @@ impl History {
                 }
             }
             ScoreChange::Remove => {
-                let position = position
-                    .ok_or_else(|| ProjectFinderError::HistoryEntryNotFound(path.into()))?;
+                let position = position.ok_or_else(|| Error::HistoryEntryNotFound(path.into()))?;
                 self.projects.remove(position);
             }
         }
@@ -223,7 +220,7 @@ impl History {
                 project
                     .path
                     .try_exists()
-                    .map_err(|source| ProjectFinderError::read_file(&project.path, source))
+                    .map_err(|source| Error::read_file(&project.path, source))
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -304,19 +301,18 @@ impl History {
                 })
                 .collect(),
         };
-        let contents = toml::to_string_pretty(&stored)
-            .map_err(|source| ProjectFinderError::SerializeHistory { source })?;
+        let contents =
+            toml::to_string_pretty(&stored).map_err(|source| Error::SerializeHistory { source })?;
         let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
-        fs::create_dir_all(parent)
-            .map_err(|source| ProjectFinderError::write_file(parent, source))?;
+        fs::create_dir_all(parent).map_err(|source| Error::write_file(parent, source))?;
         let mut temp = NamedTempFile::new_in(parent)
-            .map_err(|source| ProjectFinderError::write_file(&self.path, source))?;
+            .map_err(|source| Error::write_file(&self.path, source))?;
         temp.write_all(contents.as_bytes())
             .and_then(|()| temp.as_file_mut().sync_all())
-            .map_err(|source| ProjectFinderError::write_file(&self.path, source))?;
+            .map_err(|source| Error::write_file(&self.path, source))?;
         temp.persist(&self.path)
-            .map_err(|error| ProjectFinderError::write_file(&self.path, error.error))?;
-        sync_parent(parent).map_err(|source| ProjectFinderError::write_file(parent, source))?;
+            .map_err(|error| Error::write_file(&self.path, error.error))?;
+        sync_parent(parent).map_err(|source| Error::write_file(parent, source))?;
         Ok(())
     }
 }
@@ -351,14 +347,14 @@ fn validate_score(score: f64) -> Result<()> {
     if score.is_finite() && score >= 1.0 {
         Ok(())
     } else {
-        Err(ProjectFinderError::InvalidScore(score))
+        Err(Error::InvalidScore(score))
     }
 }
 
 fn unix_timestamp(time: SystemTime) -> Result<u64> {
     time.duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
-        .map_err(|source| ProjectFinderError::InvalidSystemTime { source })
+        .map_err(|source| Error::InvalidSystemTime { source })
 }
 
 #[cfg(unix)]

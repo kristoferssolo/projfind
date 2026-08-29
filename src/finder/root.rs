@@ -1,7 +1,7 @@
 use super::is_covered;
 use crate::{
     config::Config,
-    errors::{ProjectFinderError, Result},
+    error::{Error, Result},
     git::{GIT_DIR, marks_repository},
 };
 use std::{
@@ -88,7 +88,7 @@ impl RootResolver {
                 let marker = ancestor.join(marker_name);
                 if marker
                     .try_exists()
-                    .map_err(|source| ProjectFinderError::read_file(&marker, source))?
+                    .map_err(|source| Error::read_file(&marker, source))?
                 {
                     candidates.insert(self.resolve(ancestor, marker_name)?);
                 }
@@ -218,7 +218,7 @@ fn file_matches(file: &Path, test: ContentTest) -> Result<bool> {
     match read_to_string(file) {
         Ok(contents) => Ok(test.matches(&contents)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(ProjectFinderError::read_file(file, error)),
+        Err(error) => Err(Error::read_file(file, error)),
     }
 }
 

@@ -3,7 +3,7 @@ pub mod root;
 use self::root::RootResolver;
 use crate::{
     config::Config,
-    errors::{ProjectFinderError, Result},
+    error::{Error, Result},
     scan::{DirectoryScan, scan_directories},
 };
 use std::{
@@ -112,7 +112,7 @@ impl ProjectFinder {
     fn scan(&self) -> Result<DirectoryScan> {
         for path in &self.config.paths {
             if !path.is_dir() {
-                return Err(ProjectFinderError::PathNotFound(path.clone()));
+                return Err(Error::PathNotFound(path.clone()));
             }
 
             if self.config.verbose {

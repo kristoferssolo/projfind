@@ -3,7 +3,7 @@ mod common;
 use claims::assert_err;
 use color_eyre::eyre::{Result, eyre};
 use common::{file, repository, worktree};
-use mekle::{config::Config, errors::ProjectFinderError, finder::ProjectFinder};
+use mekle::{config::Config, error::Error, finder::ProjectFinder};
 use std::{
     os::unix::fs::symlink,
     path::{Path, PathBuf},
@@ -277,7 +277,7 @@ fn a_search_path_that_is_not_a_directory_fails() -> Result<()> {
     let error = assert_err!(ProjectFinder::new(config).find_projects());
 
     assert!(
-        matches!(&error, ProjectFinderError::PathNotFound(path) if *path == missing),
+        matches!(&error, Error::PathNotFound(path) if *path == missing),
         "unexpected error: {error}"
     );
     Ok(())

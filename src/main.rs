@@ -5,7 +5,7 @@ use color_eyre::{
 use mekle::{
     completions,
     config::{Config, HistoryCommand, Invocation, cli_command, contract_tilde, home},
-    errors::ProjectFinderError,
+    error::Error,
     finder::{ProjectFinder, root::RootResolver},
     history::{History, HistoryEntry, ScoreChange, history_file_path},
     output::{rank_projects, write_projects},
@@ -40,7 +40,7 @@ fn main() -> Result<()> {
 }
 
 fn manage_history(command: HistoryCommand) -> Result<()> {
-    let history_path = history_file_path().ok_or(ProjectFinderError::HistoryLocationNotFound)?;
+    let history_path = history_file_path().ok_or(Error::HistoryLocationNotFound)?;
     let mut history = History::open(history_path)?;
     match command {
         HistoryCommand::List => print_entries(history.entries()?),
@@ -50,7 +50,7 @@ fn manage_history(command: HistoryCommand) -> Result<()> {
                 .entries()?
                 .into_iter()
                 .find(|entry| entry.path == path)
-                .ok_or(ProjectFinderError::HistoryEntryNotFound(path))?;
+                .ok_or(Error::HistoryEntryNotFound(path))?;
             print_entries([entry]);
         }
         HistoryCommand::Set { path, score } => {
@@ -126,10 +126,10 @@ fn find_projects(mut config: Config) -> Result<()> {
 
 fn add_project(path: &Path, resolver: &RootResolver) -> Result<()> {
     if !path.is_dir() {
-        return Err(ProjectFinderError::PathNotFound(path.to_path_buf()).into());
+        return Err(Error::PathNotFound(path.to_path_buf()).into());
     }
     let project = resolver.resolve_directory(&normalize_path(path)?)?;
-    let history_path = history_file_path().ok_or(ProjectFinderError::HistoryLocationNotFound)?;
+    let history_path = history_file_path().ok_or(Error::HistoryLocationNotFound)?;
     History::open(history_path)?.record(&project)?;
     Ok(())
 }
@@ -137,7 +137,7 @@ fn add_project(path: &Path, resolver: &RootResolver) -> Result<()> {
 fn normalize_path(path: &Path) -> Result<std::path::PathBuf> {
     if path.exists() {
         return fs::canonicalize(path).map_err(|source| {
-            ProjectFinderError::ResolvePath {
+            Error::ResolvePath {
                 path: path.to_path_buf(),
                 source,
             }
@@ -146,7 +146,7 @@ fn normalize_path(path: &Path) -> Result<std::path::PathBuf> {
     }
 
     std::path::absolute(path).map_err(|source| {
-        ProjectFinderError::ResolvePath {
+        Error::ResolvePath {
             path: path.to_path_buf(),
             source,
         }

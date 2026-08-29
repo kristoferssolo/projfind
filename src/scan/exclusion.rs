@@ -1,4 +1,4 @@
-use crate::errors::{ProjectFinderError, Result};
+use crate::error::{Error, Result};
 use ignore::{Match, gitignore::Gitignore, gitignore::GitignoreBuilder};
 use std::path::{Path, PathBuf};
 
@@ -33,17 +33,17 @@ impl Exclusion {
     fn new(root: &Path, patterns: &[String]) -> Result<Self> {
         let mut builder = GitignoreBuilder::new(root);
         for pattern in patterns {
-            builder.add_line(None, pattern).map_err(|source| {
-                ProjectFinderError::InvalidExcludePattern {
+            builder
+                .add_line(None, pattern)
+                .map_err(|source| Error::InvalidExcludePattern {
                     pattern: pattern.clone(),
                     source,
-                }
-            })?;
+                })?;
         }
 
         let matcher = builder
             .build()
-            .map_err(|source| ProjectFinderError::InvalidExcludeSet { source })?;
+            .map_err(|source| Error::InvalidExcludeSet { source })?;
         Ok(Self {
             root: root.to_path_buf(),
             matcher,

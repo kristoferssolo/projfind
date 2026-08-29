@@ -1,6 +1,6 @@
 pub mod completions;
 pub mod config;
-pub mod errors;
+pub mod error;
 pub mod finder;
 pub mod git;
 pub mod history;

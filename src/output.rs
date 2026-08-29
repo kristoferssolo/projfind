@@ -1,23 +1,15 @@
 use crate::{
     config::{OutputFormat, contract_tilde},
+    error::Result,
     finder::Project,
     history::HistoryEntry,
 };
 use serde::Serialize;
 use std::{
     collections::HashMap,
-    io::{self, Write},
+    io::Write,
     path::{Path, PathBuf},
 };
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum OutputError {
-    #[error("Failed to write project output")]
-    Write(#[from] io::Error),
-    #[error("Failed to serialize project output as JSON")]
-    Json(#[from] serde_json::Error),
-}
 
 #[derive(Debug, Serialize)]
 pub struct ProjectResult {
@@ -72,7 +64,7 @@ pub fn write_projects(
     projects: &[ProjectResult],
     format: OutputFormat,
     home: Option<&Path>,
-) -> Result<(), OutputError> {
+) -> Result<()> {
     for project in projects {
         match format {
             OutputFormat::Path => {

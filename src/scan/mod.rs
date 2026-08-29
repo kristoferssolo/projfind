@@ -1,7 +1,7 @@
 mod exclusion;
 
 use crate::{
-    errors::Result,
+    error::Result,
     git::{GIT_DIR, marks_repository},
     scan::exclusion::Exclusions,
 };

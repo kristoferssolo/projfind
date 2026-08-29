@@ -1,12 +1,20 @@
+//! The crate's error type.
+//!
+//! Every fallible operation reports through [`Error`], so a failure always
+//! names the path or pattern it happened on. The binary turns these into
+//! reports at the outermost boundary.
+
 use std::{
     io,
     path::{Path, PathBuf},
     time::SystemTimeError,
 };
-use thiserror::Error;
+use thiserror::Error as ThisError;
 
-#[derive(Debug, Error)]
-pub enum ProjectFinderError {
+/// Anything that can go wrong while discovering, ranking, or recording
+/// projects.
+#[derive(Debug, ThisError)]
+pub enum Error {
     #[error("Path not found: {0}")]
     PathNotFound(PathBuf),
 
@@ -87,9 +95,16 @@ pub enum ProjectFinderError {
         #[source]
         source: SystemTimeError,
     },
+
+    #[error("Failed to write project output")]
+    WriteOutput(#[from] io::Error),
+
+    #[error("Failed to serialize project output as JSON")]
+    SerializeJson(#[from] serde_json::Error),
 }
 
-impl ProjectFinderError {
+impl Error {
+    /// Reports a failure to read `path`.
     #[must_use]
     pub fn read_file(path: &Path, source: io::Error) -> Self {
         Self::ReadFile {
@@ -98,6 +113,7 @@ impl ProjectFinderError {
         }
     }
 
+    /// Reports a failure to write `path`.
     #[must_use]
     pub fn write_file(path: &Path, source: io::Error) -> Self {
         Self::WriteFile {
@@ -107,4 +123,5 @@ impl ProjectFinderError {
     }
 }
 
-pub type Result<T> = std::result::Result<T, ProjectFinderError>;
+/// A [`Result`](std::result::Result) that fails with [`Error`].
+pub type Result<T> = std::result::Result<T, Error>;
