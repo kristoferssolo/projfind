@@ -2,6 +2,7 @@ use super::is_covered;
 use crate::{
     config::Config,
     errors::{ProjectFinderError, Result},
+    git::{GIT_DIR, marks_repository},
 };
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -16,15 +17,15 @@ const CARGO_WORKSPACE: ContentTest = ContentTest::LineStartsWith("[workspace]");
 const WORKSPACE_RULES: [(&str, ContentTest); 8] = [
     (
         "package.json",
-        ContentTest::ContainsAny(&["\"workspaces\"", "\"workspace\""]),
+        ContentTest::ContainsAny(&[r#""workspaces""#, r#""workspace""#]),
     ),
     (
         "deno.json",
-        ContentTest::ContainsAny(&["\"workspaces\"", "\"imports\""]),
+        ContentTest::ContainsAny(&[r#""workspaces""#, r#""imports""#]),
     ),
     (
         "deno.jsonc",
-        ContentTest::ContainsAny(&["\"workspaces\"", "\"imports\""]),
+        ContentTest::ContainsAny(&[r#""workspaces""#, r#""imports""#]),
     ),
     ("bunfig.toml", ContentTest::ContainsAny(&["workspaces"])),
     ("Cargo.toml", CARGO_WORKSPACE),
@@ -79,7 +80,7 @@ impl RootResolver {
         let mut candidates = BTreeSet::new();
 
         for ancestor in dir.ancestors() {
-            if is_git_repo(ancestor) {
+            if is_git_repo(ancestor)? {
                 projects.insert(ancestor.to_path_buf());
             }
 
@@ -130,7 +131,7 @@ impl RootResolver {
             MarkerType::CargoToml => ascend_to_root(dir, |parent| {
                 file_matches(&parent.join("Cargo.toml"), CARGO_WORKSPACE)
             })?,
-            MarkerType::BuildFile(name) => ascend_to_highest_build_file(dir, name),
+            MarkerType::BuildFile(name) => ascend_to_highest_build_file(dir, name)?,
             MarkerType::OtherConfig => ascend_to_root(dir, |_| Ok(false))?,
         };
 
@@ -227,8 +228,9 @@ fn ancestors_above(dir: &Path) -> impl Iterator<Item = &Path> {
         .take_while(|ancestor| !ancestor.as_os_str().is_empty())
 }
 
-fn is_git_repo(dir: &Path) -> bool {
-    dir.join(".git").is_dir()
+/// Reports whether `dir` is the root of a repository, worktree, or submodule.
+fn is_git_repo(dir: &Path) -> Result<bool> {
+    marks_repository(&dir.join(GIT_DIR))
 }
 
 fn ascend_to_root<F>(dir: &Path, is_root: F) -> Result<PathBuf>
@@ -236,7 +238,7 @@ where
     F: Fn(&Path) -> Result<bool>,
 {
     for parent in ancestors_above(dir) {
-        if is_git_repo(parent) || is_root(parent)? {
+        if is_git_repo(parent)? || is_root(parent)? {
             return Ok(parent.to_path_buf());
         }
     }
@@ -244,7 +246,7 @@ where
     Ok(dir.to_path_buf())
 }
 
-fn ascend_to_highest_build_file(dir: &Path, build_file: &str) -> PathBuf {
+fn ascend_to_highest_build_file(dir: &Path, build_file: &str) -> Result<PathBuf> {
     let mut highest = dir;
 
     for parent in ancestors_above(dir) {
@@ -252,12 +254,12 @@ fn ascend_to_highest_build_file(dir: &Path, build_file: &str) -> PathBuf {
             highest = parent;
         }
 
-        if is_git_repo(parent) {
-            return parent.to_path_buf();
+        if is_git_repo(parent)? {
+            return Ok(parent.to_path_buf());
         }
     }
 
-    highest.to_path_buf()
+    Ok(highest.to_path_buf())
 }
 
 #[cfg(test)]
@@ -350,6 +352,34 @@ mod tests {
     }
 
     #[test]
+    fn a_worktree_outranks_the_repository_and_workspace_around_it() {
+        let temp = TempDir::new().expect("create temp dir");
+        create_dir_all(temp.path().join(GIT_DIR)).expect("create .git");
+        write(
+            temp.path().join("Cargo.toml"),
+            "[workspace]\nmembers = [\"feature/crates/*\"]\n",
+        )
+        .expect("write workspace manifest");
+
+        let worktree = temp.path().join("feature");
+        let admin = temp.path().join(".git/worktrees/feature");
+        create_dir_all(&admin).expect("create worktree admin dir");
+        let member = worktree.join("crates/one");
+        create_dir_all(&member).expect("create member dir");
+        write(
+            worktree.join(GIT_DIR),
+            format!("gitdir: {}\n", admin.display()),
+        )
+        .expect("write worktree .git file");
+        write(member.join("Cargo.toml"), "[package]\nname = \"one\"\n")
+            .expect("write member manifest");
+
+        let resolver = RootResolver::new(Vec::new());
+
+        assert_ok_eq!(resolver.resolve(&member, "Cargo.toml"), worktree);
+    }
+
+    #[test]
     fn ascent_falls_back_to_the_starting_directory() {
         let dir = Path::new("no-ancestors");
 
@@ -366,7 +396,7 @@ mod tests {
         write(leaf.join("Makefile"), "").expect("write leaf Makefile");
         write(temp.path().join("a/Makefile"), "").expect("write parent Makefile");
 
-        assert_eq!(
+        assert_ok_eq!(
             ascend_to_highest_build_file(&leaf, "Makefile"),
             temp.path().to_path_buf()
         );
@@ -375,7 +405,10 @@ mod tests {
     #[test]
     fn build_file_ascent_without_a_repository_keeps_the_start() {
         let dir = Path::new("no-ancestors");
-        assert_eq!(ascend_to_highest_build_file(dir, "Makefile"), dir);
+        assert_ok_eq!(
+            ascend_to_highest_build_file(dir, "Makefile"),
+            dir.to_path_buf()
+        );
     }
 
     #[test]

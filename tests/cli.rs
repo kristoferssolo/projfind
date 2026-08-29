@@ -1,4 +1,7 @@
+mod common;
+
 use color_eyre::eyre::{Result, bail, eyre};
+use common::{file, repository, worktree};
 use std::{
     ffi::{OsStr, OsString},
     fs::{create_dir_all, write},
@@ -101,18 +104,11 @@ impl Run {
     }
 }
 
-fn repository(dir: &Path) -> Result<()> {
-    create_dir_all(dir.join(".git"))?;
-    write(dir.join(".git/HEAD"), "ref: refs/heads/main\n")?;
-    Ok(())
-}
-
 fn sample_tree() -> Result<TempDir> {
     let temp = TempDir::new()?;
     repository(&temp.path().join("alpha"))?;
-    create_dir_all(temp.path().join("beta"))?;
-    write(
-        temp.path().join("beta/Cargo.toml"),
+    file(
+        &temp.path().join("beta/Cargo.toml"),
         "[package]\nname = \"beta\"\n",
     )?;
     Ok(temp)
@@ -191,6 +187,31 @@ fn adding_a_nested_directory_records_the_discovered_project_root() -> Result<()>
         .projects()?;
 
     assert_eq!(projects, ["~/beta"]);
+    Ok(())
+}
+
+#[test]
+fn adding_a_nested_worktree_directory_records_the_worktree_root() -> Result<()> {
+    let temp = sample_tree()?;
+    let root = temp.path().join("feature");
+    worktree(&root, &temp.path().join("alpha/.git/worktrees/feature"))?;
+    let nested = root.join("src/finder");
+    create_dir_all(&nested)?;
+    let run = Run::new()?
+        .home(temp.path())
+        .current_dir(&nested)
+        .arg("add")
+        .arg(".");
+    run.stdout()?;
+
+    let projects = run
+        .clear_args()
+        .arg(temp.path())
+        .arg("--max-results")
+        .arg("1")
+        .projects()?;
+
+    assert_eq!(projects, ["~/feature"]);
     Ok(())
 }
 

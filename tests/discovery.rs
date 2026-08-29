@@ -1,8 +1,10 @@
+mod common;
+
 use claims::assert_err;
 use color_eyre::eyre::{Result, eyre};
+use common::{file, repository, worktree};
 use mekle::{config::Config, errors::ProjectFinderError, finder::ProjectFinder};
 use std::{
-    fs::{create_dir_all, write},
     os::unix::fs::symlink,
     path::{Path, PathBuf},
 };
@@ -39,20 +41,6 @@ fn expect(paths: &[&str]) -> Vec<PathBuf> {
     paths.iter().map(PathBuf::from).collect()
 }
 
-fn repository(dir: &Path) -> Result<()> {
-    create_dir_all(dir.join(".git"))?;
-    write(dir.join(".git/HEAD"), "ref: refs/heads/main\n")?;
-    Ok(())
-}
-
-fn file(path: &Path, contents: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        create_dir_all(parent)?;
-    }
-    write(path, contents)?;
-    Ok(())
-}
-
 #[test]
 fn repositories_and_marker_directories_are_both_projects() -> Result<()> {
     let temp = TempDir::new()?;
@@ -65,12 +53,26 @@ fn repositories_and_marker_directories_are_both_projects() -> Result<()> {
 }
 
 #[test]
-fn a_git_file_is_not_a_repository() -> Result<()> {
+fn a_worktree_is_a_project_without_a_marker() -> Result<()> {
+    let temp = TempDir::new()?;
+    let main = TempDir::new()?;
+    worktree(
+        &temp.path().join("feature"),
+        &main.path().join(".git/worktrees/feature"),
+    )?;
+
+    assert_eq!(projects_in(temp.path())?, expect(&["feature"]));
+    Ok(())
+}
+
+#[test]
+fn a_git_file_that_redirects_nowhere_is_not_a_repository() -> Result<()> {
     let temp = TempDir::new()?;
     file(
-        &temp.path().join("worktree/.git"),
+        &temp.path().join("dangling/.git"),
         "gitdir: /elsewhere/.git\n",
     )?;
+    file(&temp.path().join("notes/.git"), "just a stray file\n")?;
 
     let projects = projects_in(temp.path())?;
 
@@ -289,6 +291,23 @@ fn an_excluded_directory_is_not_a_project() -> Result<()> {
 
     let mut config = config_for(temp.path())?;
     config.exclude = vec!["target/".to_owned()];
+
+    assert_eq!(search(temp.path(), config)?, expect(&["keep"]));
+    Ok(())
+}
+
+#[test]
+fn an_excluded_worktree_is_not_a_project() -> Result<()> {
+    let temp = TempDir::new()?;
+    let main = TempDir::new()?;
+    repository(&temp.path().join("keep"))?;
+    worktree(
+        &temp.path().join("worktrees/feature"),
+        &main.path().join(".git/worktrees/feature"),
+    )?;
+
+    let mut config = config_for(temp.path())?;
+    config.exclude = vec!["worktrees/".to_owned()];
 
     assert_eq!(search(temp.path(), config)?, expect(&["keep"]));
     Ok(())

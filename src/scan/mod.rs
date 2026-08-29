@@ -1,7 +1,10 @@
 mod exclusion;
 
-use self::exclusion::Exclusions;
-use crate::errors::Result;
+use crate::{
+    errors::Result,
+    git::{GIT_DIR, marks_repository},
+    scan::exclusion::Exclusions,
+};
 use ignore::{DirEntry, WalkBuilder, WalkState};
 use std::{
     collections::HashSet,
@@ -10,7 +13,6 @@ use std::{
 };
 use tracing::{debug, warn};
 
-const GIT_DIR: &str = ".git";
 const POISONED: &str = "scan lock poisoned";
 
 /// Everything one walk found: repository roots and paths to marker files.
@@ -114,10 +116,17 @@ fn visit(
 }
 
 fn record_repository(entry: &DirEntry, scan: &Mutex<DirectoryScan>) -> WalkState {
-    if !entry.file_type().is_some_and(|kind| kind.is_dir()) {
-        return WalkState::Continue;
+    let path = entry.path();
+    match marks_repository(path) {
+        Ok(true) => {}
+        Ok(false) => return WalkState::Continue,
+        Err(error) => {
+            warn!("Skipping unreadable repository marker: {error}");
+            return WalkState::Continue;
+        }
     }
-    if let Some(parent) = entry.path().parent() {
+
+    if let Some(parent) = path.parent() {
         scan.lock()
             .expect(POISONED)
             .git_repos
