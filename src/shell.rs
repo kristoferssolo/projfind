@@ -1,3 +1,5 @@
+//! The shell integration that defines the `m` function.
+
 use crate::completions::CompletionShell;
 
 const BASH: &str = r#"m() {

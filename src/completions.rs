@@ -1,3 +1,6 @@
+//! Shell completion scripts, and the hand-written additions clap cannot
+//! generate.
+
 use clap::{Command, ValueEnum, ValueHint};
 use clap_complete::{Shell, generate as generate_for};
 use std::io::{self, Write};

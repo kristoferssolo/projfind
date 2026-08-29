@@ -1,3 +1,9 @@
+//! Deciding which directory a marker file really belongs to.
+//!
+//! A manifest deep inside a monorepo names a member, not a project, so each
+//! marker is walked upwards until it reaches the repository or workspace that
+//! owns it.
+
 use super::is_covered;
 use crate::{
     config::Config,
@@ -11,8 +17,11 @@ use std::{
     sync::RwLock,
 };
 
+/// A `Cargo.toml` declares a workspace by opening a `[workspace]` table.
 const CARGO_WORKSPACE: ContentTest = ContentTest::LineStartsWith("[workspace]");
 
+/// Manifests that make the directory holding them a workspace root, and what
+/// each one has to contain to count.
 const WORKSPACE_RULES: [(&str, ContentTest); 8] = [
     (
         "package.json",
