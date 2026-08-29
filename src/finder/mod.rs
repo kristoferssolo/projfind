@@ -1,9 +1,12 @@
+//! Turning a directory walk into the list of projects it found.
+
 pub mod root;
 
 use self::root::RootResolver;
 use crate::{
     config::Config,
     error::{Error, Result},
+    git::GIT_DIR,
     scan::{DirectoryScan, scan_directories},
 };
 use std::{
@@ -13,19 +16,28 @@ use std::{
 };
 use tracing::info;
 
+/// A directory worth reporting, and the markers that identified it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
     pub path: PathBuf,
     pub markers: Vec<String>,
 }
 
+/// The ancestors that could absorb `candidate` into a project of their own.
+///
+/// A project only covers what lies two or more levels below it, so a direct
+/// child of a project is still a project in its own right. That is what keeps
+/// the members of a monorepo visible while their `src` directories stay hidden.
+fn covering_ancestors(candidate: &Path) -> impl Iterator<Item = &Path> {
+    candidate.ancestors().skip(2)
+}
+
+/// Reports whether one of the `known` projects already accounts for
+/// `candidate`.
 #[must_use]
 pub fn is_covered<S: BuildHasher>(candidate: &Path, known: &HashSet<PathBuf, S>) -> bool {
     known.contains(candidate)
-        || candidate
-            .ancestors()
-            .skip(2)
-            .any(|ancestor| known.contains(ancestor))
+        || covering_ancestors(candidate).any(|ancestor| known.contains(ancestor))
 }
 
 #[derive(Debug)]
@@ -67,37 +79,34 @@ impl ProjectFinder {
     pub fn find_project_details(&self) -> Result<Vec<Project>> {
         let scan = self.scan()?;
 
-        let mut project_paths = scan.git_repos.iter().cloned().collect::<HashSet<_>>();
-        let mut markers = project_paths
+        // Repositories are projects outright; every other marker has to be
+        // resolved to a root first, and may land on a repository already here.
+        let mut projects = scan
+            .git_repos
             .iter()
-            .cloned()
-            .map(|path| (path, BTreeSet::from([".git".to_owned()])))
-            .collect::<HashMap<_, _>>();
+            .map(|repo| (repo.clone(), BTreeSet::from([GIT_DIR.to_owned()])))
+            .collect::<HashMap<_, BTreeSet<String>>>();
 
         let mut candidates = self.resolve_marker_roots(&scan)?;
         candidates.sort_unstable();
         candidates.dedup();
 
         for (candidate, marker) in candidates {
-            let project = candidate
-                .ancestors()
-                .skip(2)
-                .find(|ancestor| project_paths.contains(*ancestor))
-                .map_or_else(|| candidate.clone(), Path::to_path_buf);
+            let root = covering_ancestors(&candidate)
+                .find(|ancestor| projects.contains_key(*ancestor))
+                .map(Path::to_path_buf);
 
-            project_paths.insert(project.clone());
-            markers.entry(project).or_default().insert(marker);
+            projects
+                .entry(root.unwrap_or(candidate))
+                .or_default()
+                .insert(marker);
         }
 
-        let mut projects = project_paths
+        let mut projects = projects
             .into_iter()
-            .map(|path| Project {
-                markers: markers
-                    .remove(&path)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .collect(),
+            .map(|(path, markers)| Project {
                 path,
+                markers: markers.into_iter().collect(),
             })
             .collect::<Vec<_>>();
         projects.sort_unstable_by(|left, right| left.path.cmp(&right.path));
@@ -111,9 +120,7 @@ impl ProjectFinder {
                 return Err(Error::PathNotFound(path.clone()));
             }
 
-            if self.config.verbose {
-                info!("Searching in: {}", path.display());
-            }
+            info!("Searching in: {}", path.display());
         }
 
         scan_directories(
