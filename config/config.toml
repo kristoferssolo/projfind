@@ -8,6 +8,15 @@ verbose = false
 # Results are unlimited when max_results is omitted.
 # max_results = 100
 
+# Gitignore-style patterns relative to each search directory, pruned from the
+# scan on top of ignore files. The default excludes nothing.
+# exclude = [
+#   "target/",
+#   "**/vendor/",
+#   "/archive/",
+#   "*.generated.toml",
+# ]
+
 # Filenames that identify directories worth reporting as projects.
 marker_files = [
   "package.json",

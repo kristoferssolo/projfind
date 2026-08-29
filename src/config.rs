@@ -43,6 +43,13 @@ struct Cli {
         help = "Print uncontracted paths separated by NUL bytes"
     )]
     null: bool,
+
+    #[arg(
+        long,
+        value_name = "PATTERN",
+        help = "Exclude entries matching a gitignore-style pattern, relative to each search directory"
+    )]
+    exclude: Vec<String>,
 }
 
 #[derive(Debug, Subcommand, Clone)]
@@ -121,6 +128,7 @@ struct FileConfig {
     search_dirs: Option<Vec<PathBuf>>,
     marker_files: Option<Vec<String>>,
     workspace_files: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
     depth: Option<usize>,
     verbose: Option<bool>,
     max_results: Option<NonZeroUsize>,
@@ -133,6 +141,8 @@ pub struct Config {
     pub paths: Vec<PathBuf>,
     pub marker_files: Vec<String>,
     pub workspace_files: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
     pub depth: usize,
     pub verbose: bool,
     #[serde(default)]
@@ -269,6 +279,9 @@ impl FileConfig {
         if let Some(workspace_files) = self.workspace_files {
             config.workspace_files = workspace_files;
         }
+        if let Some(exclude) = self.exclude {
+            config.exclude = exclude;
+        }
         if let Some(depth) = self.depth {
             config.depth = depth;
         }
@@ -295,6 +308,7 @@ impl Cli {
         if let Some(max_results) = self.max_results {
             config.max_results = Some(max_results);
         }
+        config.exclude.extend(self.exclude);
         config.output = if self.json {
             OutputFormat::Json
         } else if self.null {
@@ -360,6 +374,7 @@ mod tests {
 
         assert_eq!(config.paths, [PathBuf::from(".")]);
         assert_eq!(config.depth, 5);
+        assert!(config.exclude.is_empty());
         assert!(config.marker_files.iter().any(|file| file == "Cargo.toml"));
         assert!(
             config
@@ -525,6 +540,51 @@ max_results = 20
             config.paths,
             [home.join("repos"), PathBuf::from("/absolute")]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn exclusions_are_loaded_from_the_file() -> color_eyre::Result<()> {
+        let temp = TempDir::new()?;
+        let path = temp.path().join("config.toml");
+        write(
+            &path,
+            "exclude = [\"target/\", \"**/vendor/\", \"/archive/\"]\n",
+        )?;
+        let cli = Cli::try_parse_from(["mekle"])?;
+
+        let config = Config::from_sources(cli, Some(&path))?;
+
+        assert_eq!(config.exclude, ["target/", "**/vendor/", "/archive/"]);
+        Ok(())
+    }
+
+    #[test]
+    fn repeated_cli_exclusions_are_collected() -> color_eyre::Result<()> {
+        let cli = Cli::try_parse_from([
+            "mekle",
+            "--exclude",
+            "target/",
+            "--exclude",
+            "node_modules/",
+        ])?;
+
+        let config = Config::from_sources(cli, None)?;
+
+        assert_eq!(config.exclude, ["target/", "node_modules/"]);
+        Ok(())
+    }
+
+    #[test]
+    fn cli_exclusions_append_to_configured_ones() -> color_eyre::Result<()> {
+        let temp = TempDir::new()?;
+        let path = temp.path().join("config.toml");
+        write(&path, "exclude = [\"target/\"]\n")?;
+        let cli = Cli::try_parse_from(["mekle", "--exclude", "dist/"])?;
+
+        let config = Config::from_sources(cli, Some(&path))?;
+
+        assert_eq!(config.exclude, ["target/", "dist/"]);
         Ok(())
     }
 }

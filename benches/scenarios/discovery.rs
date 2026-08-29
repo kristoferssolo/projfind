@@ -57,8 +57,8 @@ pub fn benchmark_scan(c: &mut Criterion) {
             group.throughput(Throughput::Elements(size as u64));
             group.bench_function(BenchmarkId::new(shape, size), |b| {
                 b.iter(|| {
-                    let scan = scan_directories(&dirs, &marker_files, SEARCH_DEPTH);
-                    black_box((scan.git_repos, scan.marker_files))
+                    let scan = scan_directories(&dirs, &marker_files, SEARCH_DEPTH, &[]);
+                    black_box(scan.expect("scan succeeded"))
                 });
             });
         }

@@ -49,8 +49,9 @@ impl ProjectFinder {
     ///
     /// # Errors
     ///
-    /// Returns an error if a configured path is not a directory, or if a
-    /// marker cannot be resolved to a project root.
+    /// Returns an error if a configured path is not a directory, if an
+    /// exclusion pattern is invalid, or if a marker cannot be resolved to a
+    /// project root.
     pub fn find_projects(&self) -> Result<Vec<PathBuf>> {
         self.find_project_details()
             .map(|projects| projects.into_iter().map(|project| project.path).collect())
@@ -60,8 +61,9 @@ impl ProjectFinder {
     ///
     /// # Errors
     ///
-    /// Returns an error if a configured path is not a directory, or if a
-    /// marker cannot be resolved to a project root.
+    /// Returns an error if a configured path is not a directory, if an
+    /// exclusion pattern is invalid, or if a marker cannot be resolved to a
+    /// project root.
     pub fn find_project_details(&self) -> Result<Vec<Project>> {
         let scan = self.scan()?;
 
@@ -118,11 +120,12 @@ impl ProjectFinder {
             }
         }
 
-        Ok(scan_directories(
+        scan_directories(
             &self.config.paths,
             &self.config.marker_files,
             self.config.depth,
-        ))
+            &self.config.exclude,
+        )
     }
 
     fn resolve_marker_roots(&self, scan: &DirectoryScan) -> Result<Vec<(PathBuf, String)>> {

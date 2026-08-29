@@ -26,6 +26,9 @@ mekle [OPTIONS] [PATHS]... [COMMAND]
 - `-v, --verbose` prints progress to stderr.
 - `--json` prints one JSON object per line.
 - `-0, --null` prints uncontracted paths separated by NUL bytes.
+- `--exclude <PATTERN>` skips entries matching a gitignore-style pattern,
+  relative to each search directory. Repeatable, and appended to the
+  configured `exclude` list.
 - `PATHS` replaces configured search directories (default: `.`).
 
 The default output prints one path per line and shortens paths under `$HOME` to
@@ -37,6 +40,7 @@ mekle --depth 3 ~/src
 mekle --verbose ~/src ~/work
 mekle --json ~/src
 mekle -0 ~/src | xargs -0 -n1 printf '%s\n'
+mekle --exclude target/ --exclude '**/vendor/' ~/src
 mekle add ~/src/mekle
 ```
 
@@ -131,7 +135,14 @@ search_dirs = ["~/src", "/home/me/work"]
 depth = 5
 marker_files = ["Cargo.toml", "package.json", "pyproject.toml"]
 workspace_files = ["pnpm-workspace.yaml", "lerna.json"]
+exclude = ["target/", "**/vendor/", "/archive/", "*.generated.toml"]
 ```
+
+`exclude` holds gitignore-style patterns interpreted relative to each search
+directory. A pattern without a leading `/` matches at any depth; `/archive/`
+matches only at the search directory itself. Excluded directories are pruned
+and excluded files are skipped, on top of ignore files, so exclusions can only
+remove results.
 
 ## Root resolution
 

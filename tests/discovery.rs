@@ -280,3 +280,118 @@ fn a_search_path_that_is_not_a_directory_fails() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn an_excluded_directory_is_not_a_project() -> Result<()> {
+    let temp = TempDir::new()?;
+    repository(&temp.path().join("keep"))?;
+    repository(&temp.path().join("target/inside"))?;
+
+    let mut config = config_for(temp.path())?;
+    config.exclude = vec!["target/".to_owned()];
+
+    assert_eq!(search(temp.path(), config)?, expect(&["keep"]));
+    Ok(())
+}
+
+#[test]
+fn an_excluded_marker_file_is_not_a_project() -> Result<()> {
+    let temp = TempDir::new()?;
+    file(&temp.path().join("keep/Cargo.toml"), "[package]\n")?;
+    file(&temp.path().join("generated/Cargo.toml"), "[package]\n")?;
+
+    let mut config = config_for(temp.path())?;
+    config.exclude = vec!["generated/".to_owned()];
+
+    assert_eq!(search(temp.path(), config)?, expect(&["keep"]));
+    Ok(())
+}
+
+#[test]
+fn anchored_patterns_exclude_only_at_the_search_root() -> Result<()> {
+    let temp = TempDir::new()?;
+    repository(&temp.path().join("archive/repo"))?;
+    repository(&temp.path().join("nested/archive/repo"))?;
+    repository(&temp.path().join("repo"))?;
+
+    let mut config = config_for(temp.path())?;
+    config.exclude = vec!["/archive/".to_owned()];
+
+    assert_eq!(
+        search(temp.path(), config)?,
+        expect(&["nested/archive/repo", "repo"])
+    );
+    Ok(())
+}
+
+#[test]
+fn recursive_patterns_exclude_at_any_depth() -> Result<()> {
+    let temp = TempDir::new()?;
+    repository(&temp.path().join("app/vendor/repo"))?;
+    repository(&temp.path().join("repo"))?;
+
+    let mut config = config_for(temp.path())?;
+    config.exclude = vec!["**/vendor/".to_owned()];
+
+    assert_eq!(search(temp.path(), config)?, expect(&["repo"]));
+    Ok(())
+}
+
+#[test]
+fn exclusions_apply_to_every_search_directory() -> Result<()> {
+    let temp = TempDir::new()?;
+    let first = temp.path().join("first");
+    let second = temp.path().join("second");
+    repository(&first.join("skip/repo"))?;
+    repository(&first.join("keep/repo"))?;
+    repository(&second.join("skip/repo"))?;
+    repository(&second.join("keep/repo"))?;
+
+    let mut config = config_for(temp.path())?;
+    config.paths = vec![first, second];
+    config.exclude = vec!["skip/".to_owned()];
+
+    let projects = ProjectFinder::new(config).find_projects()?;
+
+    assert_eq!(projects.len(), 2);
+    assert!(projects.iter().all(|project| {
+        project
+            .file_name()
+            .is_some_and(|name| name == "keep" || name == "repo")
+    }));
+    Ok(())
+}
+
+#[test]
+fn exclusions_stack_with_ignore_files() -> Result<()> {
+    let temp = TempDir::new()?;
+    // Ignore files are honoured inside a repository, so the search root needs
+    // to be one.
+    repository(temp.path())?;
+    repository(&temp.path().join("excluded/repo"))?;
+    repository(&temp.path().join("ignored/repo"))?;
+    repository(&temp.path().join("repo"))?;
+    file(&temp.path().join(".gitignore"), "ignored/\n")?;
+
+    let mut config = config_for(temp.path())?;
+    config.exclude = vec!["excluded/".to_owned()];
+
+    assert_eq!(search(temp.path(), config)?, expect(&["", "repo"]));
+    Ok(())
+}
+
+#[test]
+fn an_invalid_exclusion_pattern_fails_the_search() -> Result<()> {
+    let temp = TempDir::new()?;
+
+    let mut config = config_for(temp.path())?;
+    config.exclude = vec!["[z-a]".to_owned()];
+
+    let error = assert_err!(ProjectFinder::new(config).find_projects());
+
+    assert!(
+        error.to_string().contains("[z-a]"),
+        "error does not name the pattern: {error}"
+    );
+    Ok(())
+}
