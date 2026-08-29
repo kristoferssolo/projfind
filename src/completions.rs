@@ -13,7 +13,7 @@ const BASH_SCOPE_PATH_COMPLETION: &str = r#"
 __mekle_complete() {
     _mekle "$@"
 
-    if [[ "${COMP_WORDS[1]}" == "add" && ${COMP_CWORD} -eq 2 ]] ||
+    if [[ ${COMP_CWORD} -eq 2 && " add pin unpin " == *" ${COMP_WORDS[1]} "* ]] ||
        [[ "${COMP_WORDS[1]}" == "history" && ${COMP_CWORD} -eq 3 &&
           " show set adjust remove " == *" ${COMP_WORDS[2]} "* ]]; then
         COMPREPLY+=( $(compgen -f -- "${COMP_WORDS[COMP_CWORD]}") )

@@ -44,18 +44,19 @@ mekle --json ~/src
 mekle -0 ~/src | xargs -0 -n1 printf '%s\n'
 mekle --exclude target/ --exclude '**/vendor/' ~/src
 mekle add ~/src/mekle
+mekle pin ~/src/mekle
 ```
 
 JSON output is newline-delimited. Each record has `path`, `score`, `frecency`,
-`last_used`, and `markers`. `last_used` is a Unix timestamp, or `null` for a
-project that is not in the history. Untracked projects have a score and
-frecency of `0`.
+`last_used`, `pinned`, and `markers`. `last_used` is a Unix timestamp, or
+`null` for a project that is not in the history. Untracked projects have a
+score and frecency of `0`.
 
 ## Project ranking
 
-`mekle add <PATH>` records a project visit. The normal project list puts
-recorded projects first, ordered by frecency. Untracked projects remain sorted
-by path.
+`mekle add <PATH>` records a project visit. The normal project list puts pinned
+projects first, then the remaining recorded projects ordered by frecency.
+Untracked projects remain sorted by path.
 
 `mekle init <SHELL>` defines `m`, which lists projects in `fzf`, changes to the
 selected directory, and records the visit. Add the command for your shell to
@@ -89,6 +90,27 @@ time since the last visit adjusts that score:
 When the sum of stored scores exceeds `10,000`, mekle reduces all scores to
 about 90 percent of that limit and removes entries that fall below `1`.
 
+### Pinned projects
+
+Frecency drifts, so a project you rely on but have not opened this week sinks.
+Pinning holds it in place instead.
+
+```bash
+mekle pin ~/src/mekle
+mekle unpin ~/src/mekle
+```
+
+Both commands take any directory inside a project and resolve it to the same
+root `mekle add` would record, so `mekle pin .` works from anywhere in the
+tree. A pinned project ranks above every unpinned one whatever its frecency,
+pinned projects rank against each other by frecency, and aging never drops a
+pinned project. Pinning a project mekle has not seen records it with a score of
+`1`; unpinning leaves the score and the last visit alone.
+
+Pinning changes ranking, not discovery: a pinned project still has to lie under
+a search directory to be listed. `mekle history prune` and `mekle history
+remove` drop pinned entries like any other.
+
 History is stored at `$XDG_DATA_HOME/mekle/history.toml`, falling back to
 `$HOME/.local/share/mekle/history.toml`.
 
@@ -106,7 +128,7 @@ mekle history clear
 ```
 
 `list` and `show` print tab-separated raw score, weighted score, time since the
-last visit, and path. `set` creates a missing entry. `adjust` requires an
+last visit, `pinned` or `-`, and path. `set` creates a missing entry. `adjust` requires an
 existing entry and removes it when the result falls below `1`. `prune` removes
 entries whose project paths no longer exist. `clear` removes the entire
 history.

@@ -5,7 +5,7 @@ use color_eyre::{
 use mekle::{
     completions,
     config::{Config, HistoryCommand, Invocation, cli_command},
-    error::Error,
+    error::{self, Error},
     finder::{ProjectFinder, root::RootResolver},
     history::{History, HistoryEntry, ScoreChange},
     output::{rank_projects, write_entries, write_projects},
@@ -13,7 +13,7 @@ use mekle::{
 };
 use std::{
     io::{stderr, stdout},
-    path::Path,
+    path::{Path, PathBuf},
 };
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
@@ -34,7 +34,9 @@ fn main() -> Result<()> {
             print!("{}", shell.init());
             Ok(())
         }
-        Invocation::Add { path, config } => add_project(&path, &RootResolver::from_config(&config)),
+        Invocation::Add { path, config } => add_project(&path, &config),
+        Invocation::Pin { path, config } => change_pin(&path, &config, History::pin),
+        Invocation::Unpin { path, config } => change_pin(&path, &config, History::unpin),
         Invocation::History(command) => manage_history(command),
     }
 }
@@ -64,14 +66,30 @@ fn find_projects(config: Config) -> Result<()> {
     Ok(())
 }
 
-fn add_project(path: &Path, resolver: &RootResolver) -> Result<()> {
+fn add_project(path: &Path, config: &Config) -> Result<()> {
+    open_history()?.record(&resolve_project(path, config)?)?;
+    Ok(())
+}
+
+/// Pins or unpins the project `path` belongs to, whichever `change` is.
+fn change_pin(
+    path: &Path,
+    config: &Config,
+    change: fn(&mut History, &Path) -> error::Result<()>,
+) -> Result<()> {
+    let project = resolve_project(path, config)?;
+    change(&mut open_history()?, &project)?;
+    Ok(())
+}
+
+/// Resolves a directory the user named to the project root discovery reports
+/// for it, which is the path history records under.
+fn resolve_project(path: &Path, config: &Config) -> Result<PathBuf> {
     if !path.is_dir() {
         return Err(Error::PathNotFound(path.to_path_buf()).into());
     }
 
-    let project = resolver.resolve_directory(&paths::normalize(path)?)?;
-    open_history()?.record(&project)?;
-    Ok(())
+    Ok(RootResolver::from_config(config).resolve_directory(&paths::normalize(path)?)?)
 }
 
 fn manage_history(command: HistoryCommand) -> Result<()> {

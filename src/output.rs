@@ -23,11 +23,12 @@ pub struct ProjectResult {
     pub score: f64,
     pub frecency: f64,
     pub last_used: Option<u64>,
+    pub pinned: bool,
     pub markers: Vec<String>,
 }
 
-/// Orders `projects` by descending frecency, then by path, and attaches each
-/// one's recorded usage.
+/// Orders `projects` by pin, then by descending frecency, then by path, and
+/// attaches each one's recorded usage.
 ///
 /// Projects history has never seen rank last, in path order.
 #[must_use]
@@ -36,15 +37,19 @@ pub fn rank_projects(mut projects: Vec<Project>, history: &[HistoryEntry]) -> Ve
         .iter()
         .map(|entry| (entry.path.as_path(), entry))
         .collect::<HashMap<_, _>>();
-    let frecency_of = |path: &Path| {
+    // How a project stands in the ranking: pinned first, then frecency.
+    let standing_of = |path: &Path| {
         history_by_path
             .get(path)
-            .map_or(0.0, |entry| entry.frecency)
+            .map_or((false, 0.0), |entry| (entry.pinned, entry.frecency))
     };
 
     projects.sort_unstable_by(|left, right| {
-        frecency_of(&right.path)
-            .total_cmp(&frecency_of(&left.path))
+        let (left_pinned, left_frecency) = standing_of(&left.path);
+        let (right_pinned, right_frecency) = standing_of(&right.path);
+        right_pinned
+            .cmp(&left_pinned)
+            .then_with(|| right_frecency.total_cmp(&left_frecency))
             .then_with(|| left.path.cmp(&right.path))
     });
 
@@ -57,6 +62,7 @@ pub fn rank_projects(mut projects: Vec<Project>, history: &[HistoryEntry]) -> Ve
                 score: entry.map_or(0.0, |entry| entry.score),
                 frecency: entry.map_or(0.0, |entry| entry.frecency),
                 last_used: entry.map(|entry| entry.last_used_at),
+                pinned: entry.is_some_and(|entry| entry.pinned),
                 markers: project.markers,
             }
         })
@@ -93,7 +99,7 @@ pub fn write_projects(
     Ok(())
 }
 
-/// Writes history entries as score, frecency, age, and path columns.
+/// Writes history entries as score, frecency, age, pin, and path columns.
 ///
 /// # Errors
 ///
@@ -106,10 +112,11 @@ pub fn write_entries(
     for entry in entries {
         writeln!(
             writer,
-            "{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}",
             entry.score,
             entry.frecency,
             format_age(entry.last_used),
+            if entry.pinned { "pinned" } else { "-" },
             contract_tilde(&entry.path, home).display()
         )?;
     }
@@ -166,19 +173,48 @@ mod tests {
                 markers: vec![".git".to_owned()],
             })
             .to_vec();
-        let history = [HistoryEntry {
-            path: PathBuf::from("/tracked"),
-            score: 3.0,
-            frecency: 12.0,
-            last_used: Duration::ZERO,
-            last_used_at: 0,
-        }];
+        let history = [entry("/tracked", 12.0, false)];
 
         let ranked = rank_projects(projects, &history);
 
         assert_eq!(
-            ranked.iter().map(|result| &result.path).collect::<Vec<_>>(),
+            paths_of(&ranked),
             [Path::new("/tracked"), Path::new("/untracked")]
         );
+    }
+
+    #[test]
+    fn pinned_projects_rank_above_more_frecent_ones() {
+        let projects = ["/frecent", "/pinned"]
+            .map(|path| Project {
+                path: PathBuf::from(path),
+                markers: vec![".git".to_owned()],
+            })
+            .to_vec();
+        let history = [entry("/frecent", 40.0, false), entry("/pinned", 1.0, true)];
+
+        let ranked = rank_projects(projects, &history);
+
+        assert_eq!(
+            paths_of(&ranked),
+            [Path::new("/pinned"), Path::new("/frecent")]
+        );
+        assert!(ranked[0].pinned);
+        assert!(!ranked[1].pinned);
+    }
+
+    fn entry(path: &str, frecency: f64, pinned: bool) -> HistoryEntry {
+        HistoryEntry {
+            path: PathBuf::from(path),
+            score: 3.0,
+            frecency,
+            last_used: Duration::ZERO,
+            last_used_at: 0,
+            pinned,
+        }
+    }
+
+    fn paths_of(results: &[ProjectResult]) -> Vec<&Path> {
+        results.iter().map(|result| result.path.as_path()).collect()
     }
 }

@@ -4,6 +4,9 @@
 //! project used twice this hour outranks one used ten times last month. Scores
 //! are capped in aggregate and aged down when they reach the cap, which keeps
 //! the file bounded and lets old favourites fall away.
+//!
+//! Pinning opts a project out of that drift: a pinned project ranks above every
+//! unpinned one whatever its frecency, and aging never drops it.
 
 use crate::{
     error::{Error, Result},
@@ -43,6 +46,8 @@ pub struct HistoryEntry {
     pub last_used: Duration,
     /// When the project was last visited, in seconds since the Unix epoch.
     pub last_used_at: u64,
+    /// Whether the project is held above every unpinned one.
+    pub pinned: bool,
 }
 
 /// A requested change to a project's raw score.
@@ -72,6 +77,10 @@ struct ProjectUsage {
     path: PathBuf,
     score: f64,
     last_accessed: u64,
+    /// Left out of the file unless set, so an unpinned history reads the same
+    /// as one written before pinning existed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pinned: bool,
 }
 
 impl History {
@@ -134,8 +143,9 @@ impl History {
             .collect::<Vec<_>>();
         entries.sort_unstable_by(|left, right| {
             right
-                .frecency
-                .total_cmp(&left.frecency)
+                .pinned
+                .cmp(&left.pinned)
+                .then_with(|| right.frecency.total_cmp(&left.frecency))
                 .then_with(|| left.path.cmp(&right.path))
         });
         entries
@@ -156,6 +166,25 @@ impl History {
         }
         self.age();
         self.save()
+    }
+
+    /// Pins a project so it ranks above every unpinned one, recording it first
+    /// if history has not seen it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the clock is invalid or the history cannot be written.
+    pub fn pin(&mut self, path: &Path) -> Result<()> {
+        self.set_pinned(path, true)
+    }
+
+    /// Unpins a project, leaving its score and its last visit alone.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the project is not in history, or it cannot be written.
+    pub fn unpin(&mut self, path: &Path) -> Result<()> {
+        self.set_pinned(path, false)
     }
 
     /// Removes every entry and persists the empty history.
@@ -190,6 +219,20 @@ impl History {
         self.save()
     }
 
+    /// A project only reaches history by being pinned when it has never been
+    /// visited, so it starts at the score one visit would have earned.
+    fn set_pinned(&mut self, path: &Path, pinned: bool) -> Result<()> {
+        match self.position_of(path) {
+            Ok(position) => self.projects[position].pinned = pinned,
+            Err(error) if !pinned => return Err(error),
+            Err(_) => self.projects.push(ProjectUsage {
+                pinned: true,
+                ..ProjectUsage::new(path, MINIMUM_SCORE, unix_timestamp(SystemTime::now())?)
+            }),
+        }
+        self.save()
+    }
+
     fn position_of(&self, path: &Path) -> Result<usize> {
         self.projects
             .iter()
@@ -201,11 +244,11 @@ impl History {
         validate_score(score)?;
         match self.position_of(path) {
             Ok(position) => self.projects[position].score = score,
-            Err(_) => self.projects.push(ProjectUsage {
-                path: path.to_path_buf(),
+            Err(_) => self.projects.push(ProjectUsage::new(
+                path,
                 score,
-                last_accessed: unix_timestamp(SystemTime::now())?,
-            }),
+                unix_timestamp(SystemTime::now())?,
+            )),
         }
         Ok(())
     }
@@ -237,18 +280,14 @@ impl History {
             project.score += 1.0;
             project.last_accessed = timestamp;
         } else {
-            self.projects.push(ProjectUsage {
-                path: path.to_path_buf(),
-                score: 1.0,
-                last_accessed: timestamp,
-            });
+            self.projects.push(ProjectUsage::new(path, 1.0, timestamp));
         }
         self.age();
         Ok(())
     }
 
     /// Scales every score down once they total more than [`MAX_TOTAL_SCORE`],
-    /// dropping the projects that fall below [`MINIMUM_SCORE`].
+    /// dropping the unpinned projects that fall below [`MINIMUM_SCORE`].
     fn age(&mut self) {
         let total = self
             .projects
@@ -264,7 +303,7 @@ impl History {
             project.score *= factor;
         }
         self.projects
-            .retain(|project| project.score >= MINIMUM_SCORE);
+            .retain(|project| project.pinned || project.score >= MINIMUM_SCORE);
     }
 
     fn save(&self) -> Result<()> {
@@ -280,6 +319,15 @@ impl History {
 }
 
 impl ProjectUsage {
+    fn new(path: &Path, score: f64, last_accessed: u64) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            score,
+            last_accessed,
+            pinned: false,
+        }
+    }
+
     /// Weighs a raw score by how recently the project was used.
     fn frecency(&self, now: u64) -> f64 {
         let age = now.saturating_sub(self.last_accessed);
@@ -302,6 +350,7 @@ impl ProjectUsage {
             frecency: self.frecency(now),
             last_used: Duration::from_secs(now.saturating_sub(self.last_accessed)),
             last_used_at: self.last_accessed,
+            pinned: self.pinned,
         }
     }
 }
@@ -323,16 +372,19 @@ fn unix_timestamp(time: SystemTime) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claims::assert_ok;
+    use claims::{assert_err, assert_ok};
     use tempfile::TempDir;
 
     const NOW: Duration = Duration::from_secs(2_000_000);
 
     fn usage(path: &str, score: f64, age: Duration) -> ProjectUsage {
+        ProjectUsage::new(Path::new(path), score, NOW.saturating_sub(age).as_secs())
+    }
+
+    fn pinned(path: &str, score: f64, age: Duration) -> ProjectUsage {
         ProjectUsage {
-            path: PathBuf::from(path),
-            score,
-            last_accessed: NOW.saturating_sub(age).as_secs(),
+            pinned: true,
+            ..usage(path, score, age)
         }
     }
 
@@ -445,16 +497,82 @@ mod tests {
     }
 
     #[test]
+    fn pinned_projects_rank_above_more_frecent_ones() {
+        let history = history_of(vec![
+            usage("/recent", 100.0, Duration::ZERO),
+            pinned("/favourite", 1.0, Duration::from_hours(8 * 24)),
+        ]);
+
+        assert_eq!(
+            ranking(&history),
+            ["/favourite", "/recent"].map(PathBuf::from)
+        );
+    }
+
+    #[test]
+    fn aging_keeps_pinned_projects() {
+        let mut history = history_of(vec![
+            usage("/frequent", MAX_TOTAL_SCORE, Duration::ZERO),
+            pinned("/favourite", 1.0, Duration::ZERO),
+        ]);
+
+        history.age();
+
+        assert_eq!(history.projects.len(), 2);
+        assert!(history.projects[1].score < MINIMUM_SCORE);
+    }
+
+    #[test]
+    fn pinning_an_unvisited_project_records_it() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
+        let mut history = History::open(temp.path().join("history.toml"))?;
+
+        history.pin(Path::new("/project"))?;
+
+        assert_eq!(history.projects.len(), 1);
+        assert!(history.projects[0].pinned);
+        assert!((history.projects[0].score - MINIMUM_SCORE).abs() < f64::EPSILON);
+        Ok(())
+    }
+
+    #[test]
+    fn pinning_survives_a_round_trip_and_unpinning() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
+        let database = temp.path().join("history.toml");
+        let project = Path::new("/projects/favourite");
+        let mut history = History::open(&database)?;
+        assert_ok!(history.record_at(project, UNIX_EPOCH + NOW));
+        history.pin(project)?;
+
+        let mut history = History::open(&database)?;
+        assert!(history.projects[0].pinned);
+        // The score the visit earned is left alone by both commands.
+        assert!((history.projects[0].score - 1.0).abs() < f64::EPSILON);
+
+        history.unpin(project)?;
+
+        assert!(!History::open(&database)?.projects[0].pinned);
+        Ok(())
+    }
+
+    #[test]
+    fn unpinning_an_unknown_project_fails() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
+        let mut history = History::open(temp.path().join("history.toml"))?;
+
+        assert_err!(history.unpin(Path::new("/project")));
+        Ok(())
+    }
+
+    #[test]
     fn pruning_keeps_only_projects_that_still_exist() -> Result<()> {
         let temp = TempDir::new().expect("create temp dir");
         let present = temp.path().join("present");
         std::fs::create_dir(&present).expect("create project dir");
         let mut history = History::open(temp.path().join("history.toml"))?;
-        history.projects.push(ProjectUsage {
-            path: present.clone(),
-            score: 1.0,
-            last_accessed: NOW.as_secs(),
-        });
+        history
+            .projects
+            .push(ProjectUsage::new(&present, 1.0, NOW.as_secs()));
         history
             .projects
             .push(usage("/definitely/not/here", 1.0, Duration::ZERO));

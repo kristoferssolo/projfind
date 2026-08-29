@@ -77,6 +77,16 @@ enum CliCommand {
         #[arg(help = "Project directory to record")]
         path: PathBuf,
     },
+    /// Holds a project above the frecency ranking.
+    Pin {
+        #[arg(help = "Project directory to pin")]
+        path: PathBuf,
+    },
+    /// Returns a project to the frecency ranking.
+    Unpin {
+        #[arg(help = "Project directory to unpin")]
+        path: PathBuf,
+    },
 
     /// Inspects or changes project history.
     History {
@@ -92,6 +102,8 @@ pub enum Invocation {
     Completions(CompletionShell),
     Init(CompletionShell),
     Add { path: PathBuf, config: Config },
+    Pin { path: PathBuf, config: Config },
+    Unpin { path: PathBuf, config: Config },
     History(HistoryCommand),
 }
 
@@ -187,6 +199,14 @@ impl Invocation {
             Some(CliCommand::Completions { shell }) => Ok(Self::Completions(shell)),
             Some(CliCommand::Init { shell }) => Ok(Self::Init(shell)),
             Some(CliCommand::Add { path }) => Ok(Self::Add {
+                path: paths::expand_tilde(&path, home.as_deref()),
+                config: Config::from_sources(search, config_path)?,
+            }),
+            Some(CliCommand::Pin { path }) => Ok(Self::Pin {
+                path: paths::expand_tilde(&path, home.as_deref()),
+                config: Config::from_sources(search, config_path)?,
+            }),
+            Some(CliCommand::Unpin { path }) => Ok(Self::Unpin {
                 path: paths::expand_tilde(&path, home.as_deref()),
                 config: Config::from_sources(search, config_path)?,
             }),
@@ -473,6 +493,24 @@ max_results = 20
                 assert_eq!(config.depth, 5);
             }
             other => panic!("expected an add invocation, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn pin_and_unpin_resolve_a_project_the_way_add_does() -> Result<()> {
+        let home = assert_some!(paths::home());
+
+        for args in [["mekle", "pin", "~/one"], ["mekle", "unpin", "~/one"]] {
+            let cli = Cli::try_parse_from(args).expect("arguments parse");
+
+            match Invocation::from_cli(cli, None)? {
+                Invocation::Pin { path, config } | Invocation::Unpin { path, config } => {
+                    assert_eq!(path, home.join("one"));
+                    assert_eq!(config.depth, 5);
+                }
+                other => panic!("expected a pin invocation, got {other:?}"),
+            }
         }
         Ok(())
     }

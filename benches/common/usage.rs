@@ -80,6 +80,7 @@ pub fn entries(count: usize) -> Result<Vec<HistoryEntry>> {
                 frecency: score(index) * MULTIPLIERS[bucket(index)],
                 last_used: Duration::from_secs(age),
                 last_used_at: now.saturating_sub(age),
+                pinned: false,
             }
         })
         .collect())

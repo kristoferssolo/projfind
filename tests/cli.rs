@@ -265,6 +265,7 @@ fn json_output_includes_ranking_and_marker_metadata() -> Result<()> {
     assert_eq!(records[0]["score"], 1.0);
     assert_eq!(records[0]["frecency"], 4.0);
     assert!(records[0]["last_used"].is_u64());
+    assert_eq!(records[0]["pinned"], false);
     assert_eq!(records[0]["markers"], serde_json::json!(["Cargo.toml"]));
 
     assert_eq!(
@@ -338,7 +339,9 @@ fn bash_completions_disable_paths_before_a_subcommand() -> Result<()> {
     let output = Run::new()?.arg("completions").arg("bash").stdout()?;
 
     assert!(output.contains("complete -F __mekle_complete -o nosort mekle"));
-    assert!(output.contains(r#""${COMP_WORDS[1]}" == "add" && ${COMP_CWORD} -eq 2"#));
+    assert!(
+        output.contains(r#"${COMP_CWORD} -eq 2 && " add pin unpin " == *" ${COMP_WORDS[1]} "*"#)
+    );
     assert!(output.contains(r"COMPREPLY+=( $(compgen -f"));
     Ok(())
 }
@@ -409,11 +412,71 @@ fn history_list_and_show_report_project_scores() -> Result<()> {
     assert_eq!(fields[0], "1");
     assert_eq!(fields[1], "4");
     assert!(fields[2].ends_with('s'), "unexpected age: {}", fields[2]);
-    assert_eq!(fields[3], "~/beta");
+    assert_eq!(fields[3], "-");
+    assert_eq!(fields[4], "~/beta");
 
     let run = run.clear_args().arg("history").arg("show").arg("~/beta");
     let output = run.stdout()?;
     assert!(output.ends_with("\t~/beta\n"));
+    Ok(())
+}
+
+#[test]
+fn pinned_projects_rank_first_until_they_are_unpinned() -> Result<()> {
+    let temp = sample_tree()?;
+    // beta wins on frecency, so only the pin can put alpha in front of it.
+    let run = Run::new()?.home(temp.path()).arg("history").arg("set");
+    let run = run.arg("~/beta").arg("10");
+    run.stdout()?;
+
+    let run = run.clear_args().arg("pin").arg("~/alpha");
+    run.stdout()?;
+
+    let run = run.clear_args().arg(temp.path());
+    assert_eq!(run.projects()?, ["~/alpha", "~/beta"]);
+
+    let run = run.clear_args().arg("unpin").arg("~/alpha");
+    run.stdout()?;
+
+    let run = run.clear_args().arg(temp.path());
+    assert_eq!(run.projects()?, ["~/beta", "~/alpha"]);
+    Ok(())
+}
+
+#[test]
+fn pinning_a_nested_directory_pins_the_project_root() -> Result<()> {
+    let temp = sample_tree()?;
+    let nested = temp.path().join("beta/src/finder");
+    create_dir_all(&nested)?;
+    let run = Run::new()?
+        .home(temp.path())
+        .current_dir(&nested)
+        .arg("pin")
+        .arg(".");
+    run.stdout()?;
+
+    let output = run.clear_args().arg("history").arg("list").stdout()?;
+
+    assert!(
+        output.trim_end().ends_with("pinned\t~/beta"),
+        "unexpected output: {output}"
+    );
+    Ok(())
+}
+
+#[test]
+fn unpinning_an_unrecorded_project_fails() -> Result<()> {
+    let temp = sample_tree()?;
+    let stderr = Run::new()?
+        .home(temp.path())
+        .arg("unpin")
+        .arg("~/alpha")
+        .failure()?;
+
+    assert!(
+        stderr.contains("not present in history"),
+        "unexpected stderr: {stderr}"
+    );
     Ok(())
 }
 
