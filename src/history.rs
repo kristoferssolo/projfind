@@ -5,8 +5,6 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    env,
-    ffi::OsString,
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -18,28 +16,6 @@ const AGED_TOTAL_SCORE: f64 = MAX_TOTAL_SCORE * 0.9;
 const HOUR: u64 = 3600;
 const DAY: u64 = 24 * HOUR;
 const WEEK: u64 = 7 * DAY;
-
-/// Returns the history file location from the XDG data directory or home directory.
-#[must_use]
-pub fn history_file_path() -> Option<PathBuf> {
-    history_file_path_from(env::var_os("XDG_DATA_HOME"), env::var_os("HOME"))
-}
-
-fn history_file_path_from(
-    xdg_data_home: Option<OsString>,
-    home: Option<OsString>,
-) -> Option<PathBuf> {
-    let data_home = xdg_data_home
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            home.filter(|path| !path.is_empty())
-                .map(PathBuf::from)
-                .map(|path| path.join(".local/share"))
-        })?;
-
-    Some(data_home.join("mekle/history.toml"))
-}
 
 #[derive(Debug)]
 pub struct History {
@@ -365,23 +341,6 @@ mod tests {
 
         assert!(history.projects.is_empty());
         Ok(())
-    }
-
-    #[test]
-    fn xdg_data_home_takes_precedence() {
-        let path = history_file_path_from(Some("/xdg".into()), Some("/home/user".into()));
-
-        assert_eq!(path, Some(PathBuf::from("/xdg/mekle/history.toml")));
-    }
-
-    #[test]
-    fn home_is_the_fallback_history_location() {
-        let path = history_file_path_from(None, Some("/home/user".into()));
-
-        assert_eq!(
-            path,
-            Some(PathBuf::from("/home/user/.local/share/mekle/history.toml"))
-        );
     }
 
     #[test]

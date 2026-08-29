@@ -4,11 +4,12 @@ use color_eyre::{
 };
 use mekle::{
     completions,
-    config::{Config, HistoryCommand, Invocation, cli_command, contract_tilde, home},
+    config::{Config, HistoryCommand, Invocation, cli_command},
     error::Error,
     finder::{ProjectFinder, root::RootResolver},
-    history::{History, HistoryEntry, ScoreChange, history_file_path},
+    history::{History, HistoryEntry, ScoreChange},
     output::{rank_projects, write_projects},
+    paths::{self, contract_tilde},
 };
 use std::{
     fs,
@@ -40,7 +41,7 @@ fn main() -> Result<()> {
 }
 
 fn manage_history(command: HistoryCommand) -> Result<()> {
-    let history_path = history_file_path().ok_or(Error::HistoryLocationNotFound)?;
+    let history_path = paths::history_file().ok_or(Error::HistoryLocationNotFound)?;
     let mut history = History::open(history_path)?;
     match command {
         HistoryCommand::List => print_entries(history.entries()?),
@@ -69,7 +70,7 @@ fn manage_history(command: HistoryCommand) -> Result<()> {
 }
 
 fn print_entries(entries: impl IntoIterator<Item = HistoryEntry>) {
-    let home = home();
+    let home = paths::home();
     for entry in entries {
         let path = contract_tilde(&entry.path, home.as_deref());
         println!(
@@ -104,7 +105,7 @@ fn find_projects(mut config: Config) -> Result<()> {
     let projects = ProjectFinder::new(config)
         .find_project_details()
         .wrap_err("Failed to find projects")?;
-    let history = history_file_path()
+    let history = paths::history_file()
         .map(History::open)
         .transpose()?
         .map_or_else(|| Ok(Vec::new()), |history| history.entries())?;
@@ -118,7 +119,7 @@ fn find_projects(mut config: Config) -> Result<()> {
         &mut stdout.lock(),
         &projects,
         output_format,
-        home().as_deref(),
+        paths::home().as_deref(),
     )?;
 
     Ok(())
@@ -129,7 +130,7 @@ fn add_project(path: &Path, resolver: &RootResolver) -> Result<()> {
         return Err(Error::PathNotFound(path.to_path_buf()).into());
     }
     let project = resolver.resolve_directory(&normalize_path(path)?)?;
-    let history_path = history_file_path().ok_or(Error::HistoryLocationNotFound)?;
+    let history_path = paths::history_file().ok_or(Error::HistoryLocationNotFound)?;
     History::open(history_path)?.record(&project)?;
     Ok(())
 }

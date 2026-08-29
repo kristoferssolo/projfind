@@ -6,5 +6,6 @@ pub mod fs;
 pub mod git;
 pub mod history;
 pub mod output;
+pub mod paths;
 pub mod scan;
 pub mod shell;

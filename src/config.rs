@@ -1,11 +1,10 @@
 use crate::completions::CompletionShell;
 use crate::error::{Error, Result};
 use crate::fs;
+use crate::paths;
 use clap::{CommandFactory, Parser, Subcommand};
 use serde::Deserialize;
 use std::{
-    env,
-    ffi::OsString,
     num::NonZeroUsize,
     path::{Path, PathBuf},
 };
@@ -158,13 +157,13 @@ impl Invocation {
     /// Returns an error when the configuration file cannot be read or parsed.
     pub fn load() -> Result<Self> {
         let cli = Cli::parse();
-        let home = home();
+        let home = paths::home();
         match &cli.command {
             Some(CliCommand::Completions { shell }) => return Ok(Self::Completions(*shell)),
             Some(CliCommand::Init { shell }) => return Ok(Self::Init(*shell)),
             Some(CliCommand::Add { path }) => {
-                let path = expand_tilde(path, home.as_deref());
-                let config = Config::from_sources(cli, config_file_path().as_deref())?;
+                let path = paths::expand_tilde(path, home.as_deref());
+                let config = Config::from_sources(cli, paths::config_file().as_deref())?;
                 return Ok(Self::Add(path, config));
             }
             Some(CliCommand::History { command }) => {
@@ -173,7 +172,7 @@ impl Invocation {
             None => {}
         }
 
-        Config::from_sources(cli, config_file_path().as_deref()).map(Self::Find)
+        Config::from_sources(cli, paths::config_file().as_deref()).map(Self::Find)
     }
 }
 /// Builds the complete command definition.
@@ -186,18 +185,18 @@ impl HistoryCommand {
     fn expand_path(self, home: Option<&Path>) -> Self {
         match self {
             Self::Show { path } => Self::Show {
-                path: expand_tilde(&path, home),
+                path: paths::expand_tilde(&path, home),
             },
             Self::Set { path, score } => Self::Set {
-                path: expand_tilde(&path, home),
+                path: paths::expand_tilde(&path, home),
                 score,
             },
             Self::Adjust { path, delta } => Self::Adjust {
-                path: expand_tilde(&path, home),
+                path: paths::expand_tilde(&path, home),
                 delta,
             },
             Self::Remove { path } => Self::Remove {
-                path: expand_tilde(&path, home),
+                path: paths::expand_tilde(&path, home),
             },
             command @ (Self::List | Self::Prune | Self::Clear) => command,
         }
@@ -211,7 +210,7 @@ impl Config {
     ///
     /// Returns an error when the configuration file cannot be read or parsed.
     pub fn load() -> Result<Self> {
-        Self::from_sources(Cli::parse(), config_file_path().as_deref())
+        Self::from_sources(Cli::parse(), paths::config_file().as_deref())
     }
 
     /// Returns the embedded defaults.
@@ -233,37 +232,15 @@ impl Config {
         }
 
         cli.apply_to(&mut config);
-        config.expand_paths(home().as_deref());
+        config.expand_paths(paths::home().as_deref());
         Ok(config)
     }
 
     fn expand_paths(&mut self, home: Option<&Path>) {
         for path in &mut self.paths {
-            *path = expand_tilde(path, home);
+            *path = paths::expand_tilde(path, home);
         }
     }
-}
-
-// `~user` is intentionally left unchanged.
-fn expand_tilde(path: &Path, home: Option<&Path>) -> PathBuf {
-    let (Some(home), Ok(rest)) = (home, path.strip_prefix("~")) else {
-        return path.to_path_buf();
-    };
-
-    home.join(rest)
-}
-
-#[must_use]
-pub fn contract_tilde(path: &Path, home: Option<&Path>) -> PathBuf {
-    let Some(rest) = home.and_then(|home| path.strip_prefix(home).ok()) else {
-        return path.to_path_buf();
-    };
-
-    if rest.as_os_str().is_empty() {
-        return PathBuf::from("~");
-    }
-
-    Path::new("~").join(rest)
 }
 
 impl FileConfig {
@@ -328,37 +305,10 @@ fn read_config_file(path: &Path) -> Result<Option<FileConfig>> {
         .transpose()
 }
 
-pub fn home() -> Option<PathBuf> {
-    env::var_os("HOME")
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-}
-
-fn config_file_path() -> Option<PathBuf> {
-    config_file_path_from(env::var_os("XDG_CONFIG_HOME"), env::var_os("HOME"))
-}
-
-fn config_file_path_from(
-    xdg_config_home: Option<OsString>,
-    home: Option<OsString>,
-) -> Option<PathBuf> {
-    let config_home = xdg_config_home
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            home.filter(|path| !path.is_empty())
-                .map(PathBuf::from)
-                .map(|path| path.join(".config"))
-        })?;
-
-    Some(config_home.join("mekle/config.toml"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use claims::{assert_none, assert_ok, assert_some};
-    use rstest::rstest;
     use std::fs::write;
     use tempfile::TempDir;
 
@@ -442,92 +392,12 @@ max_results = 20
     }
 
     #[test]
-    fn xdg_config_home_takes_precedence() {
-        let path = config_file_path_from(Some("/xdg".into()), Some("/home/user".into()));
-
-        assert_eq!(path, Some(PathBuf::from("/xdg/mekle/config.toml")));
-    }
-
-    #[test]
-    fn home_is_the_fallback_config_location() {
-        let path = config_file_path_from(None, Some("/home/user".into()));
-
-        assert_eq!(
-            path,
-            Some(PathBuf::from("/home/user/.config/mekle/config.toml"))
-        );
-    }
-
-    #[test]
-    fn no_config_location_is_valid() {
-        assert_none!(config_file_path_from(None, None));
-    }
-
-    #[rstest]
-    #[case(
-        "~/repos",
-        "/home/user/repos",
-        "a leading tilde becomes the home directory"
-    )]
-    #[case("~", "/home/user", "a bare tilde is the home directory itself")]
-    #[case("/tmp/~/x", "/tmp/~/x", "a tilde below the root is an ordinary name")]
-    #[case("~user/repos", "~user/repos", "the ~user form is left to the shell")]
-    #[case("./repos", "./repos", "paths without a tilde are untouched")]
-    fn tilde_expansion(#[case] input: &str, #[case] expected: &str, #[case] reason: &str) {
-        let home = PathBuf::from("/home/user");
-
-        assert_eq!(
-            expand_tilde(Path::new(input), Some(&home)),
-            PathBuf::from(expected),
-            "{reason}"
-        );
-    }
-
-    #[rstest]
-    #[case("/home/user/repos", "~/repos", "a path under home is shortened")]
-    #[case("/home/user", "~", "home itself is a bare tilde")]
-    #[case("/mnt/data/repos", "/mnt/data/repos", "paths elsewhere are untouched")]
-    #[case(
-        "/home/username/repos",
-        "/home/username/repos",
-        "a longer sibling name is not a prefix match"
-    )]
-    fn tilde_contraction(#[case] input: &str, #[case] expected: &str, #[case] reason: &str) {
-        let home = PathBuf::from("/home/user");
-
-        assert_eq!(
-            contract_tilde(Path::new(input), Some(&home)),
-            PathBuf::from(expected),
-            "{reason}"
-        );
-    }
-
-    #[rstest]
-    #[case("~/repos")]
-    #[case("~")]
-    #[case("/mnt/data")]
-    fn contraction_undoes_expansion(#[case] path: &str) {
-        let home = PathBuf::from("/home/user");
-        let expanded = expand_tilde(Path::new(path), Some(&home));
-
-        assert_eq!(contract_tilde(&expanded, Some(&home)), PathBuf::from(path));
-    }
-
-    #[test]
-    fn tildes_survive_a_missing_home() {
-        assert_eq!(
-            expand_tilde(Path::new("~/repos"), None),
-            PathBuf::from("~/repos")
-        );
-    }
-
-    #[test]
     fn configured_search_dirs_are_expanded() -> color_eyre::Result<()> {
         let temp = TempDir::new()?;
         let path = temp.path().join("config.toml");
         write(&path, "search_dirs = [\"~/repos\", \"/absolute\"]\n")?;
         let cli = Cli::try_parse_from(["mekle"])?;
-        let home = assert_some!(home());
+        let home = assert_some!(paths::home());
 
         let config = Config::from_sources(cli, Some(&path))?;
 

@@ -1,8 +1,6 @@
 use crate::{
-    config::{OutputFormat, contract_tilde},
-    error::Result,
-    finder::Project,
-    history::HistoryEntry,
+    config::OutputFormat, error::Result, finder::Project, history::HistoryEntry,
+    paths::contract_tilde,
 };
 use serde::Serialize;
 use std::{
