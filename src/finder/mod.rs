@@ -102,10 +102,6 @@ impl ProjectFinder {
             .collect::<Vec<_>>();
         projects.sort_unstable_by(|left, right| left.path.cmp(&right.path));
 
-        if let Some(max) = self.config.max_results {
-            projects.truncate(max.get());
-        }
-
         Ok(projects)
     }
 

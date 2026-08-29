@@ -96,11 +96,11 @@ fn format_age(age: std::time::Duration) -> String {
     }
 }
 
-fn find_projects(mut config: Config) -> Result<()> {
+fn find_projects(config: Config) -> Result<()> {
     init_logging(config.verbose).wrap_err("Failed to set up logging")?;
 
-    // Ranking needs the complete result set before applying the output limit.
-    let max_results = config.max_results.take();
+    // Ranking needs the complete result set, so the limit is applied last.
+    let max_results = config.max_results;
     let output_format = config.output;
     let projects = ProjectFinder::new(config)
         .find_project_details()

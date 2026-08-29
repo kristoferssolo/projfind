@@ -231,20 +231,6 @@ fn the_depth_limit_bounds_the_search() -> Result<()> {
 }
 
 #[test]
-fn max_results_keeps_the_first_roots_in_order() -> Result<()> {
-    let temp = TempDir::new()?;
-    for name in ["charlie", "alpha", "bravo"] {
-        repository(&temp.path().join(name))?;
-    }
-
-    let mut config = config_for(temp.path())?;
-    config.max_results = Some(2.try_into()?);
-
-    assert_eq!(search(temp.path(), config)?, expect(&["alpha", "bravo"]));
-    Ok(())
-}
-
-#[test]
 fn several_search_paths_are_merged() -> Result<()> {
     let first = TempDir::new()?;
     let second = TempDir::new()?;
