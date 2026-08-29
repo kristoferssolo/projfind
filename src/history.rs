@@ -1,10 +1,16 @@
+//! Recorded project visits, and the frecency they earn.
+//!
+//! A project's rank combines how often it was visited with how recently, so a
+//! project used twice this hour outranks one used ten times last month. Scores
+//! are capped in aggregate and aged down when they reach the cap, which keeps
+//! the file bounded and lets old favourites fall away.
+
 use crate::{
     error::{Error, Result},
     fs,
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -17,21 +23,29 @@ const HOUR: u64 = 3600;
 const DAY: u64 = 24 * HOUR;
 const WEEK: u64 = 7 * DAY;
 
+/// The lowest score worth keeping. Anything below it is dropped when aging.
+const MINIMUM_SCORE: f64 = 1.0;
+
+/// Every project mekle has seen the user visit.
 #[derive(Debug)]
 pub struct History {
     path: PathBuf,
     projects: Vec<ProjectUsage>,
 }
 
+/// One project's standing, as of the moment it was read.
 #[derive(Debug)]
 pub struct HistoryEntry {
     pub path: PathBuf,
     pub score: f64,
     pub frecency: f64,
+    /// How long ago the project was last visited.
     pub last_used: Duration,
+    /// When the project was last visited, in seconds since the Unix epoch.
     pub last_used_at: u64,
 }
 
+/// A requested change to a project's raw score.
 #[derive(Debug, Clone, Copy)]
 pub enum ScoreChange {
     Set(f64),
@@ -39,10 +53,18 @@ pub enum ScoreChange {
     Remove,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// The history file as it is read back.
+#[derive(Debug, Deserialize)]
 struct StoredHistory {
     version: u8,
     projects: Vec<ProjectUsage>,
+}
+
+/// The history file as it is written, borrowing what is already in memory.
+#[derive(Debug, Serialize)]
+struct StoredHistoryRef<'a> {
+    version: u8,
+    projects: &'a [ProjectUsage],
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -95,22 +117,16 @@ impl History {
         self.save()
     }
 
-    /// Sorts projects by descending frecency, then by path.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the system clock is before the Unix epoch.
-    pub fn sort(&self, projects: &mut [PathBuf]) -> Result<()> {
-        self.sort_at(projects, SystemTime::now())
-    }
-
     /// Returns recorded projects ordered by descending frecency.
     ///
     /// # Errors
     ///
     /// Returns an error if the system clock is before the Unix epoch.
     pub fn entries(&self) -> Result<Vec<HistoryEntry>> {
-        let now = unix_timestamp(SystemTime::now())?;
+        Ok(self.entries_at(unix_timestamp(SystemTime::now())?))
+    }
+
+    fn entries_at(&self, now: u64) -> Vec<HistoryEntry> {
         let mut entries = self
             .projects
             .iter()
@@ -122,7 +138,7 @@ impl History {
                 .total_cmp(&left.frecency)
                 .then_with(|| left.path.cmp(&right.path))
         });
-        Ok(entries)
+        entries
     }
 
     /// Applies a score change and persists it.
@@ -131,39 +147,11 @@ impl History {
     ///
     /// Returns an error for invalid scores, missing entries, invalid clocks, or writes.
     pub fn update(&mut self, path: &Path, change: ScoreChange) -> Result<()> {
-        let position = self
-            .projects
-            .iter()
-            .position(|project| project.path == path);
         match change {
-            ScoreChange::Set(score) => {
-                validate_score(score)?;
-                if let Some(position) = position {
-                    self.projects[position].score = score;
-                } else {
-                    self.projects.push(ProjectUsage {
-                        path: path.to_path_buf(),
-                        score,
-                        last_accessed: unix_timestamp(SystemTime::now())?,
-                    });
-                }
-            }
-            ScoreChange::Adjust(delta) => {
-                if !delta.is_finite() {
-                    return Err(Error::InvalidScore(delta));
-                }
-                let position = position.ok_or_else(|| Error::HistoryEntryNotFound(path.into()))?;
-                let score = self.projects[position].score + delta;
-                if score < 1.0 {
-                    self.projects.remove(position);
-                } else {
-                    validate_score(score)?;
-                    self.projects[position].score = score;
-                }
-            }
+            ScoreChange::Set(score) => self.set_score(path, score)?,
+            ScoreChange::Adjust(delta) => self.adjust_score(path, delta)?,
             ScoreChange::Remove => {
-                let position = position.ok_or_else(|| Error::HistoryEntryNotFound(path.into()))?;
-                self.projects.remove(position);
+                self.projects.remove(self.position_of(path)?);
             }
         }
         self.age();
@@ -202,6 +190,43 @@ impl History {
         self.save()
     }
 
+    fn position_of(&self, path: &Path) -> Result<usize> {
+        self.projects
+            .iter()
+            .position(|project| project.path == path)
+            .ok_or_else(|| Error::HistoryEntryNotFound(path.to_path_buf()))
+    }
+
+    fn set_score(&mut self, path: &Path, score: f64) -> Result<()> {
+        validate_score(score)?;
+        match self.position_of(path) {
+            Ok(position) => self.projects[position].score = score,
+            Err(_) => self.projects.push(ProjectUsage {
+                path: path.to_path_buf(),
+                score,
+                last_accessed: unix_timestamp(SystemTime::now())?,
+            }),
+        }
+        Ok(())
+    }
+
+    fn adjust_score(&mut self, path: &Path, delta: f64) -> Result<()> {
+        if !delta.is_finite() {
+            return Err(Error::InvalidScore(delta));
+        }
+
+        let position = self.position_of(path)?;
+        let score = self.projects[position].score + delta;
+        // Adjusting a project below the floor retires it instead of failing.
+        if score < MINIMUM_SCORE {
+            self.projects.remove(position);
+        } else {
+            validate_score(score)?;
+            self.projects[position].score = score;
+        }
+        Ok(())
+    }
+
     fn record_at(&mut self, path: &Path, now: SystemTime) -> Result<()> {
         let timestamp = unix_timestamp(now)?;
         if let Some(project) = self
@@ -222,24 +247,8 @@ impl History {
         Ok(())
     }
 
-    fn sort_at(&self, projects: &mut [PathBuf], now: SystemTime) -> Result<()> {
-        let timestamp = unix_timestamp(now)?;
-        let frecencies = self
-            .projects
-            .iter()
-            .map(|project| (project.path.as_path(), project.frecency(timestamp)))
-            .collect::<HashMap<_, _>>();
-
-        projects.sort_unstable_by(|left, right| {
-            let left_score = frecencies.get(left.as_path()).copied().unwrap_or_default();
-            let right_score = frecencies.get(right.as_path()).copied().unwrap_or_default();
-            right_score
-                .total_cmp(&left_score)
-                .then_with(|| left.cmp(right))
-        });
-        Ok(())
-    }
-
+    /// Scales every score down once they total more than [`MAX_TOTAL_SCORE`],
+    /// dropping the projects that fall below [`MINIMUM_SCORE`].
     fn age(&mut self) {
         let total = self
             .projects
@@ -254,21 +263,14 @@ impl History {
         for project in &mut self.projects {
             project.score *= factor;
         }
-        self.projects.retain(|project| project.score >= 1.0);
+        self.projects
+            .retain(|project| project.score >= MINIMUM_SCORE);
     }
 
     fn save(&self) -> Result<()> {
-        let stored = StoredHistory {
+        let stored = StoredHistoryRef {
             version: HISTORY_VERSION,
-            projects: self
-                .projects
-                .iter()
-                .map(|project| ProjectUsage {
-                    path: project.path.clone(),
-                    score: project.score,
-                    last_accessed: project.last_accessed,
-                })
-                .collect(),
+            projects: &self.projects,
         };
         let contents =
             toml::to_string_pretty(&stored).map_err(|source| Error::SerializeHistory { source })?;
@@ -278,6 +280,7 @@ impl History {
 }
 
 impl ProjectUsage {
+    /// Weighs a raw score by how recently the project was used.
     fn frecency(&self, now: u64) -> f64 {
         let age = now.saturating_sub(self.last_accessed);
         let multiplier = if age < HOUR {
@@ -304,7 +307,7 @@ impl ProjectUsage {
 }
 
 fn validate_score(score: f64) -> Result<()> {
-    if score.is_finite() && score >= 1.0 {
+    if score.is_finite() && score >= MINIMUM_SCORE {
         Ok(())
     } else {
         Err(Error::InvalidScore(score))
@@ -333,9 +336,16 @@ mod tests {
         }
     }
 
+    fn history_of(projects: Vec<ProjectUsage>) -> History {
+        History {
+            path: PathBuf::new(),
+            projects,
+        }
+    }
+
     #[test]
-    fn missing_file_opens_as_empty_history() -> color_eyre::Result<()> {
-        let temp = TempDir::new()?;
+    fn missing_file_opens_as_empty_history() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
 
         let history = History::open(temp.path().join("missing.toml"))?;
 
@@ -344,8 +354,8 @@ mod tests {
     }
 
     #[test]
-    fn records_are_persisted() -> color_eyre::Result<()> {
-        let temp = TempDir::new()?;
+    fn records_are_persisted() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
         let database = temp.path().join("mekle/history.toml");
         let project = Path::new("/projects/favorite");
         let mut history = History::open(&database)?;
@@ -361,8 +371,8 @@ mod tests {
     }
 
     #[test]
-    fn repeated_visits_increase_the_score() -> color_eyre::Result<()> {
-        let temp = TempDir::new()?;
+    fn repeated_visits_increase_the_score() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
         let mut history = History::open(temp.path().join("history.toml"))?;
 
         assert_ok!(history.record_at(Path::new("/project"), UNIX_EPOCH + NOW));
@@ -372,61 +382,87 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn recency_changes_project_order() -> color_eyre::Result<()> {
-        let history = History {
-            path: PathBuf::new(),
-            projects: vec![
-                usage("/recent", 2.0, Duration::from_mins(30)),
-                usage("/yesterday", 3.0, Duration::from_hours(2)),
-                usage("/week", 10.0, Duration::from_hours(2 * 24)),
-                usage("/old", 16.0, Duration::from_hours(8 * 24)),
-            ],
-        };
-        let mut projects = [
-            PathBuf::from("/old"),
-            PathBuf::from("/week"),
-            PathBuf::from("/yesterday"),
-            PathBuf::from("/recent"),
-        ];
-
-        history.sort_at(&mut projects, UNIX_EPOCH + NOW)?;
-
-        assert_eq!(
-            projects,
-            ["/recent", "/yesterday", "/week", "/old"].map(PathBuf::from)
-        );
-        Ok(())
+    /// The paths `history` reports, in the order it reports them.
+    fn ranking(history: &History) -> Vec<PathBuf> {
+        history
+            .entries_at(NOW.as_secs())
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect()
     }
 
     #[test]
-    fn untracked_projects_are_sorted_by_path() -> color_eyre::Result<()> {
-        let history = History {
-            path: PathBuf::new(),
-            projects: Vec::new(),
-        };
-        let mut projects = [PathBuf::from("/beta"), PathBuf::from("/alpha")];
+    fn recency_outweighs_a_higher_raw_score() {
+        let history = history_of(vec![
+            usage("/recent", 2.0, Duration::from_mins(30)),
+            usage("/yesterday", 3.0, Duration::from_hours(2)),
+            usage("/week", 10.0, Duration::from_hours(2 * 24)),
+            usage("/old", 16.0, Duration::from_hours(8 * 24)),
+        ]);
 
-        history.sort_at(&mut projects, UNIX_EPOCH + NOW)?;
+        assert_eq!(
+            ranking(&history),
+            ["/recent", "/yesterday", "/week", "/old"].map(PathBuf::from)
+        );
+    }
 
-        assert_eq!(projects, ["/alpha", "/beta"].map(PathBuf::from));
-        Ok(())
+    #[test]
+    fn equally_ranked_projects_are_ordered_by_path() {
+        let history = history_of(vec![
+            usage("/beta", 1.0, Duration::ZERO),
+            usage("/alpha", 1.0, Duration::ZERO),
+        ]);
+
+        assert_eq!(ranking(&history), ["/alpha", "/beta"].map(PathBuf::from));
     }
 
     #[test]
     fn aging_removes_projects_with_negligible_scores() {
-        let mut history = History {
-            path: PathBuf::new(),
-            projects: vec![
-                usage("/frequent", MAX_TOTAL_SCORE, Duration::ZERO),
-                usage("/rare", 1.0, Duration::ZERO),
-            ],
-        };
+        let mut history = history_of(vec![
+            usage("/frequent", MAX_TOTAL_SCORE, Duration::ZERO),
+            usage("/rare", 1.0, Duration::ZERO),
+        ]);
 
         history.age();
 
         assert_eq!(history.projects.len(), 1);
         assert_eq!(history.projects[0].path, Path::new("/frequent"));
         assert!(history.projects[0].score <= AGED_TOTAL_SCORE);
+    }
+
+    #[test]
+    fn adjusting_below_the_floor_retires_a_project() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
+        let mut history = History::open(temp.path().join("history.toml"))?;
+        history
+            .projects
+            .push(usage("/project", 2.0, Duration::ZERO));
+
+        history.update(Path::new("/project"), ScoreChange::Adjust(-1.5))?;
+
+        assert!(history.projects.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn pruning_keeps_only_projects_that_still_exist() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
+        let present = temp.path().join("present");
+        std::fs::create_dir(&present).expect("create project dir");
+        let mut history = History::open(temp.path().join("history.toml"))?;
+        history.projects.push(ProjectUsage {
+            path: present.clone(),
+            score: 1.0,
+            last_accessed: NOW.as_secs(),
+        });
+        history
+            .projects
+            .push(usage("/definitely/not/here", 1.0, Duration::ZERO));
+
+        history.prune()?;
+
+        assert_eq!(history.projects.len(), 1);
+        assert_eq!(history.projects[0].path, present);
+        Ok(())
     }
 }
