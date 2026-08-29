@@ -50,7 +50,8 @@ mekle pin ~/src/mekle
 JSON output is newline-delimited. Each record has `path`, `score`, `frecency`,
 `last_used`, `pinned`, and `markers`. `last_used` is a Unix timestamp, or
 `null` for a project that is not in the history. Untracked projects have a
-score and frecency of `0`.
+score and frecency of `0`, and a pinned directory that discovery never
+classified has an empty `markers` list.
 
 ## Project ranking
 
@@ -107,9 +108,16 @@ pinned projects rank against each other by frecency, and aging never drops a
 pinned project. Pinning a project mekle has not seen records it with a score of
 `1`; unpinning leaves the score and the last visit alone.
 
-Pinning changes ranking, not discovery: a pinned project still has to lie under
-a search directory to be listed. `mekle history prune` and `mekle history
-remove` drop pinned entries like any other.
+A pin is listed whether or not the search would have found it. That covers a
+project outside every search directory, and a plain directory that holds no
+marker file at all, so `mekle pin ~/notes` puts `~/notes` at the top of the
+list. Such a directory is reported with an empty `markers` list, since nothing
+classified it as a project. A pin whose directory no longer exists is left out
+of the listing rather than reported; `mekle history prune` clears it for good,
+and `mekle history remove` drops a pinned entry like any other.
+
+Because an explicit pin outranks a pattern, a pinned project is listed even
+when `exclude` would have skipped it.
 
 History is stored at `$XDG_DATA_HOME/mekle/history.toml`, falling back to
 `$HOME/.local/share/mekle/history.toml`.

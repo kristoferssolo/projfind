@@ -1,12 +1,12 @@
-//! Ranking discovered projects against history, and printing them.
+//! Joining discovered projects to history, ranking them, and printing them.
 
 use crate::{
-    config::OutputFormat, error::Result, finder::Project, history::HistoryEntry,
+    config::OutputFormat, error::Result, finder::Project, fs, history::HistoryEntry,
     paths::contract_tilde,
 };
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::Write,
     path::{Path, PathBuf},
     time::Duration,
@@ -25,6 +25,40 @@ pub struct ProjectResult {
     pub last_used: Option<u64>,
     pub pinned: bool,
     pub markers: Vec<String>,
+}
+
+/// Adds the pinned projects the walk did not reach, so a favourite outside the
+/// search directories is still listed.
+///
+/// A pin whose directory is gone is left out rather than reported, and one the
+/// walk already found is left as discovery built it, markers and all. Anything
+/// added here carries no markers: it is a directory the user named, not one
+/// discovery classified.
+///
+/// # Errors
+///
+/// Returns an error when a pinned path cannot be inspected.
+pub fn include_pinned(projects: &mut Vec<Project>, history: &[HistoryEntry]) -> Result<()> {
+    let discovered = projects
+        .iter()
+        .map(|project| project.path.as_path())
+        .collect::<HashSet<_>>();
+
+    let missing = history
+        .iter()
+        .filter(|entry| entry.pinned && !discovered.contains(entry.path.as_path()))
+        .filter_map(|entry| match fs::is_dir(&entry.path) {
+            Ok(true) => Some(Ok(Project {
+                path: entry.path.clone(),
+                markers: Vec::new(),
+            })),
+            Ok(false) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    projects.extend(missing);
+    Ok(())
 }
 
 /// Orders `projects` by pin, then by descending frecency, then by path, and
@@ -150,6 +184,8 @@ fn path_bytes(path: &Path) -> &[u8] {
 mod tests {
     use super::*;
     use rstest::rstest;
+    use std::fs::create_dir;
+    use tempfile::TempDir;
 
     #[rstest]
     #[case(0, "0s")]
@@ -201,6 +237,49 @@ mod tests {
         );
         assert!(ranked[0].pinned);
         assert!(!ranked[1].pinned);
+    }
+
+    #[test]
+    fn pinned_projects_the_walk_missed_are_included() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
+        let outside = temp.path().join("outside");
+        create_dir(&outside).expect("create the pinned directory");
+        let mut projects = vec![Project {
+            path: temp.path().join("found"),
+            markers: vec![".git".to_owned()],
+        }];
+        let history = [
+            // Already discovered, so it keeps the markers discovery gave it.
+            pinned_entry(&temp.path().join("found")),
+            pinned_entry(&outside),
+            // Unpinned, so an absent project stays absent.
+            entry("/tracked", 12.0, false),
+        ];
+
+        include_pinned(&mut projects, &history)?;
+
+        assert_eq!(projects.len(), 2);
+        assert_eq!(projects[0].markers, [".git"]);
+        assert_eq!(projects[1].path, outside);
+        assert!(projects[1].markers.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn pinned_projects_that_are_gone_are_left_out() -> Result<()> {
+        let mut projects = Vec::new();
+
+        include_pinned(
+            &mut projects,
+            &[pinned_entry(Path::new("/definitely/not/here"))],
+        )?;
+
+        assert!(projects.is_empty());
+        Ok(())
+    }
+
+    fn pinned_entry(path: &Path) -> HistoryEntry {
+        entry(&path.display().to_string(), 4.0, true)
     }
 
     fn entry(path: &str, frecency: f64, pinned: bool) -> HistoryEntry {

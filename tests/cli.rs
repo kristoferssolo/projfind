@@ -4,7 +4,7 @@ use color_eyre::eyre::{Result, bail, eyre};
 use common::{file, repository, worktree};
 use std::{
     ffi::{OsStr, OsString},
-    fs::{create_dir_all, write},
+    fs::{create_dir_all, remove_dir, write},
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     process::{Command, Output},
@@ -461,6 +461,47 @@ fn pinning_a_nested_directory_pins_the_project_root() -> Result<()> {
         output.trim_end().ends_with("pinned\t~/beta"),
         "unexpected output: {output}"
     );
+    Ok(())
+}
+
+#[test]
+fn a_pin_outside_the_search_is_listed_until_its_directory_is_gone() -> Result<()> {
+    let temp = sample_tree()?;
+    let notes = temp.path().join("notes");
+    create_dir_all(&notes)?;
+    let empty = temp.path().join("empty");
+    create_dir_all(&empty)?;
+    let run = Run::new()?.home(temp.path()).arg("pin").arg("~/notes");
+    run.stdout()?;
+
+    // Nothing to find here, and notes holds no marker, so only the pin is left.
+    let run = run.clear_args().arg(&empty);
+    assert_eq!(run.projects()?, ["~/notes"]);
+
+    let run = run.clear_args().arg(temp.path());
+    assert_eq!(run.projects()?, ["~/notes", "~/alpha", "~/beta"]);
+
+    remove_dir(&notes)?;
+    let run = run.clear_args().arg(temp.path());
+    assert_eq!(run.projects()?, ["~/alpha", "~/beta"]);
+    Ok(())
+}
+
+#[test]
+fn a_pin_outside_the_search_carries_no_markers() -> Result<()> {
+    let temp = sample_tree()?;
+    create_dir_all(temp.path().join("notes"))?;
+    let empty = temp.path().join("empty");
+    create_dir_all(&empty)?;
+    let run = Run::new()?.home(temp.path()).arg("pin").arg("~/notes");
+    run.stdout()?;
+
+    let run = run.clear_args().arg("--json").arg(&empty);
+    let record = serde_json::from_str::<serde_json::Value>(run.stdout()?.trim())?;
+
+    assert_eq!(record["path"].as_str(), temp.path().join("notes").to_str());
+    assert_eq!(record["pinned"], true);
+    assert_eq!(record["markers"], serde_json::json!([]));
     Ok(())
 }
 

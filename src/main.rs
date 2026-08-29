@@ -8,7 +8,7 @@ use mekle::{
     error::{self, Error},
     finder::{ProjectFinder, root::RootResolver},
     history::{History, HistoryEntry, ScoreChange},
-    output::{rank_projects, write_entries, write_projects},
+    output::{include_pinned, rank_projects, write_entries, write_projects},
     paths,
 };
 use std::{
@@ -47,11 +47,13 @@ fn find_projects(config: Config) -> Result<()> {
     // Ranking needs the complete result set, so the limit is applied last.
     let max_results = config.max_results;
     let output = config.output;
-    let projects = ProjectFinder::new(config)
+    let mut projects = ProjectFinder::new(config)
         .find_project_details()
         .wrap_err("Failed to find projects")?;
 
-    let mut projects = rank_projects(projects, &open_history()?.entries()?);
+    let history = open_history()?.entries()?;
+    include_pinned(&mut projects, &history)?;
+    let mut projects = rank_projects(projects, &history);
     if let Some(max) = max_results {
         projects.truncate(max.get());
     }
