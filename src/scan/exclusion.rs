@@ -1,3 +1,5 @@
+//! Gitignore-style exclusions, applied per search directory.
+
 use crate::error::{Error, Result};
 use ignore::{Match, gitignore::Gitignore, gitignore::GitignoreBuilder};
 use std::path::{Path, PathBuf};

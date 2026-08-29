@@ -1,3 +1,5 @@
+//! Walking the search directories once, in parallel.
+
 mod exclusion;
 
 use crate::{
@@ -45,19 +47,17 @@ pub fn scan_directories(
         return Ok(DirectoryScan::default());
     };
 
-    let exclusions = Exclusions::new(dirs, exclude)?;
-    let markers = marker_names.iter().map(String::as_str).collect();
-    let scan = Mutex::new(DirectoryScan::default());
-    let walker = build_walker(first, rest, max_depth);
+    let visitor = Visitor {
+        exclusions: Exclusions::new(dirs, exclude)?,
+        markers: marker_names.iter().map(String::as_str).collect(),
+        scan: Mutex::new(DirectoryScan::default()),
+    };
 
-    walker.build_parallel().run(|| {
-        let exclusions = &exclusions;
-        let markers = &markers;
-        let scan = &scan;
-        Box::new(move |entry| visit(entry, exclusions, markers, scan))
-    });
+    build_walker(first, rest, max_depth)
+        .build_parallel()
+        .run(|| Box::new(|entry| visitor.visit(entry)));
 
-    Ok(scan.into_inner().expect(POISONED))
+    Ok(visitor.scan.into_inner().expect(POISONED))
 }
 
 fn build_walker(first: &Path, rest: &[PathBuf], max_depth: usize) -> WalkBuilder {
@@ -74,78 +74,85 @@ fn build_walker(first: &Path, rest: &[PathBuf], max_depth: usize) -> WalkBuilder
     builder
 }
 
-fn visit(
-    entry: std::result::Result<DirEntry, ignore::Error>,
-    exclusions: &Exclusions,
-    markers: &HashSet<&str>,
-    scan: &Mutex<DirectoryScan>,
-) -> WalkState {
-    let entry = match entry {
-        Ok(entry) => entry,
-        Err(error) => {
-            warn!("Skipping unreadable entry: {error}");
-            return WalkState::Continue;
-        }
-    };
-
-    let Some(file_type) = entry.file_type() else {
-        return WalkState::Continue;
-    };
-    if entry.depth() == 0 {
-        return WalkState::Continue;
-    }
-    if exclusions.matches(entry.path(), file_type.is_dir()) {
-        return WalkState::Skip;
-    }
-    if !file_type.is_dir() && !file_type.is_file() {
-        return WalkState::Continue;
-    }
-
-    if entry.file_name() == GIT_DIR {
-        return record_repository(&entry, scan);
-    }
-    if entry
-        .file_name()
-        .to_str()
-        .is_some_and(|name| markers.contains(name))
-    {
-        return record_marker(entry, scan);
-    }
-
-    WalkState::Continue
+/// What every walker thread needs, and the results they share.
+struct Visitor<'a> {
+    exclusions: Exclusions,
+    markers: HashSet<&'a str>,
+    scan: Mutex<DirectoryScan>,
 }
 
-fn record_repository(entry: &DirEntry, scan: &Mutex<DirectoryScan>) -> WalkState {
-    let path = entry.path();
-    match marks_repository(path) {
-        Ok(true) => {}
-        Ok(false) => return WalkState::Continue,
-        Err(error) => {
-            warn!("Skipping unreadable repository marker: {error}");
+impl Visitor<'_> {
+    fn visit(&self, entry: std::result::Result<DirEntry, ignore::Error>) -> WalkState {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                warn!("Skipping unreadable entry: {error}");
+                return WalkState::Continue;
+            }
+        };
+
+        // The search directories themselves are never results.
+        if entry.depth() == 0 {
             return WalkState::Continue;
         }
-    }
+        let Some(file_type) = entry.file_type() else {
+            return WalkState::Continue;
+        };
+        if self.exclusions.matches(entry.path(), file_type.is_dir()) {
+            return WalkState::Skip;
+        }
+        if !file_type.is_dir() && !file_type.is_file() {
+            return WalkState::Continue;
+        }
 
-    if let Some(parent) = path.parent() {
-        scan.lock()
-            .expect(POISONED)
-            .git_repos
-            .push(parent.to_path_buf());
-    }
-    WalkState::Skip
-}
+        if entry.file_name() == GIT_DIR {
+            return self.record_repository(&entry);
+        }
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| self.markers.contains(name))
+        {
+            return self.record_marker(entry);
+        }
 
-fn record_marker(entry: DirEntry, scan: &Mutex<DirectoryScan>) -> WalkState {
-    let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
-    scan.lock()
-        .expect(POISONED)
-        .marker_files
-        .push(entry.into_path());
-
-    if is_dir {
-        WalkState::Skip
-    } else {
         WalkState::Continue
+    }
+
+    /// Records the directory holding a `.git` entry, and stops descending into
+    /// the repository it marks.
+    fn record_repository(&self, entry: &DirEntry) -> WalkState {
+        let path = entry.path();
+        match marks_repository(path) {
+            Ok(true) => {}
+            Ok(false) => return WalkState::Continue,
+            Err(error) => {
+                warn!("Skipping unreadable repository marker: {error}");
+                return WalkState::Continue;
+            }
+        }
+
+        if let Some(parent) = path.parent() {
+            self.push(|scan| scan.git_repos.push(parent.to_path_buf()));
+        }
+        WalkState::Skip
+    }
+
+    fn record_marker(&self, entry: DirEntry) -> WalkState {
+        // A marker that is itself a directory, such as a bare `rockspec`, has
+        // nothing below it worth walking.
+        let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
+        self.push(|scan| scan.marker_files.push(entry.into_path()));
+
+        if is_dir {
+            WalkState::Skip
+        } else {
+            WalkState::Continue
+        }
+    }
+
+    fn push(&self, record: impl FnOnce(&mut DirectoryScan)) {
+        record(&mut self.scan.lock().expect(POISONED));
     }
 }
 
