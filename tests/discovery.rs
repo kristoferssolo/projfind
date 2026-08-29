@@ -365,8 +365,7 @@ fn exclusions_apply_to_every_search_directory() -> Result<()> {
 #[test]
 fn exclusions_stack_with_ignore_files() -> Result<()> {
     let temp = TempDir::new()?;
-    // Ignore files are honoured inside a repository, so the search root needs
-    // to be one.
+    // Ignore files are only honoured inside a repository.
     repository(temp.path())?;
     repository(&temp.path().join("excluded/repo"))?;
     repository(&temp.path().join("ignored/repo"))?;

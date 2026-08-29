@@ -76,6 +76,12 @@ pub enum ProjectFinderError {
         source: ignore::Error,
     },
 
+    #[error("Failed to compile the exclusion patterns: {source}")]
+    InvalidExcludeSet {
+        #[source]
+        source: ignore::Error,
+    },
+
     #[error("The system clock is before the Unix epoch")]
     InvalidSystemTime {
         #[source]

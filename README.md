@@ -139,10 +139,12 @@ exclude = ["target/", "**/vendor/", "/archive/", "*.generated.toml"]
 ```
 
 `exclude` holds gitignore-style patterns interpreted relative to each search
-directory. A pattern without a leading `/` matches at any depth; `/archive/`
-matches only at the search directory itself. Excluded directories are pruned
-and excluded files are skipped, on top of ignore files, so exclusions can only
-remove results.
+directory. Following gitignore rules, a pattern without a slash, such as
+`*.generated.toml`, matches at any depth, while a pattern containing a slash,
+such as `skip/Cargo.toml` or `/archive/`, matches only relative to the search
+directory (`**/skip/Cargo.toml` matches at any depth). Excluded directories
+are pruned and excluded files are skipped, on top of ignore files, so
+exclusions can only remove results.
 
 ## Root resolution
 
