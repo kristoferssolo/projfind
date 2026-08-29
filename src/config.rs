@@ -1,14 +1,23 @@
-use crate::completions::CompletionShell;
-use crate::error::{Error, Result};
-use crate::fs;
-use crate::paths;
-use clap::{CommandFactory, Parser, Subcommand};
+//! The command line, the configuration file, and how they layer.
+//!
+//! Settings come from three sources, each overriding the one before it: the
+//! defaults embedded at compile time, the user's configuration file, and the
+//! command line.
+
+use crate::{
+    completions::CompletionShell,
+    error::{Error, Result},
+    fs, paths,
+};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 use serde::Deserialize;
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
 };
+
 const DEFAULT_CONFIG: &str = include_str!("../config/config.toml");
+
 #[derive(Debug, Parser, Clone)]
 #[command(
     author,
@@ -19,6 +28,13 @@ struct Cli {
     #[command(subcommand)]
     command: Option<CliCommand>,
 
+    #[command(flatten)]
+    search: SearchArgs,
+}
+
+/// The options that shape a search, shared by the bare invocation and `add`.
+#[derive(Debug, Args, Clone)]
+struct SearchArgs {
     #[arg(help = "Directories to search")]
     paths: Vec<PathBuf>,
 
@@ -69,15 +85,17 @@ enum CliCommand {
     },
 }
 
+/// What the user asked mekle to do.
 #[derive(Debug)]
 pub enum Invocation {
     Find(Config),
     Completions(CompletionShell),
     Init(CompletionShell),
-    Add(PathBuf, Config),
+    Add { path: PathBuf, config: Config },
     History(HistoryCommand),
 }
 
+/// How discovered projects are printed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OutputFormat {
     #[default]
@@ -120,6 +138,7 @@ pub enum HistoryCommand {
     Clear,
 }
 
+/// The configuration file, where every setting is optional.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileConfig {
@@ -132,6 +151,7 @@ struct FileConfig {
     max_results: Option<NonZeroUsize>,
 }
 
+/// The effective settings for one run.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -156,25 +176,28 @@ impl Invocation {
     ///
     /// Returns an error when the configuration file cannot be read or parsed.
     pub fn load() -> Result<Self> {
-        let cli = Cli::parse();
-        let home = paths::home();
-        match &cli.command {
-            Some(CliCommand::Completions { shell }) => return Ok(Self::Completions(*shell)),
-            Some(CliCommand::Init { shell }) => return Ok(Self::Init(*shell)),
-            Some(CliCommand::Add { path }) => {
-                let path = paths::expand_tilde(path, home.as_deref());
-                let config = Config::from_sources(cli, paths::config_file().as_deref())?;
-                return Ok(Self::Add(path, config));
-            }
-            Some(CliCommand::History { command }) => {
-                return Ok(Self::History(command.clone().expand_path(home.as_deref())));
-            }
-            None => {}
-        }
+        Self::from_cli(Cli::parse(), paths::config_file().as_deref())
+    }
 
-        Config::from_sources(cli, paths::config_file().as_deref()).map(Self::Find)
+    fn from_cli(cli: Cli, config_path: Option<&Path>) -> Result<Self> {
+        let home = paths::home();
+        let Cli { command, search } = cli;
+
+        match command {
+            Some(CliCommand::Completions { shell }) => Ok(Self::Completions(shell)),
+            Some(CliCommand::Init { shell }) => Ok(Self::Init(shell)),
+            Some(CliCommand::Add { path }) => Ok(Self::Add {
+                path: paths::expand_tilde(&path, home.as_deref()),
+                config: Config::from_sources(search, config_path)?,
+            }),
+            Some(CliCommand::History { command }) => {
+                Ok(Self::History(command.expand_path(home.as_deref())))
+            }
+            None => Config::from_sources(search, config_path).map(Self::Find),
+        }
     }
 }
+
 /// Builds the complete command definition.
 #[must_use]
 pub fn cli_command() -> clap::Command {
@@ -204,15 +227,6 @@ impl HistoryCommand {
 }
 
 impl Config {
-    /// Loads the effective configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the configuration file cannot be read or parsed.
-    pub fn load() -> Result<Self> {
-        Self::from_sources(Cli::parse(), paths::config_file().as_deref())
-    }
-
     /// Returns the embedded defaults.
     ///
     /// # Errors
@@ -222,75 +236,66 @@ impl Config {
         toml::from_str(DEFAULT_CONFIG).map_err(|source| Error::ParseDefaultConfig { source })
     }
 
-    fn from_sources(cli: Cli, path: Option<&Path>) -> Result<Self> {
+    fn from_sources(cli: SearchArgs, path: Option<&Path>) -> Result<Self> {
         let mut config = Self::defaults()?;
 
-        if let Some(path) = path
-            && let Some(file) = read_config_file(path)?
-        {
+        if let Some(file) = path.map(read_config_file).transpose()?.flatten() {
             file.apply_to(&mut config);
         }
 
         cli.apply_to(&mut config);
-        config.expand_paths(paths::home().as_deref());
+        let home = paths::home();
+        for path in &mut config.paths {
+            *path = paths::expand_tilde(path, home.as_deref());
+        }
+
         Ok(config)
     }
+}
 
-    fn expand_paths(&mut self, home: Option<&Path>) {
-        for path in &mut self.paths {
-            *path = paths::expand_tilde(path, home);
-        }
+/// Overwrites `target` when the layer above supplied a value.
+fn overlay<T>(target: &mut T, value: Option<T>) {
+    if let Some(value) = value {
+        *target = value;
     }
 }
 
 impl FileConfig {
     fn apply_to(self, config: &mut Config) {
-        if let Some(search_dirs) = self.search_dirs {
-            config.paths = search_dirs;
-        }
-        if let Some(marker_files) = self.marker_files {
-            config.marker_files = marker_files;
-        }
-        if let Some(workspace_files) = self.workspace_files {
-            config.workspace_files = workspace_files;
-        }
-        if let Some(exclude) = self.exclude {
-            config.exclude = exclude;
-        }
-        if let Some(depth) = self.depth {
-            config.depth = depth;
-        }
-        if let Some(verbose) = self.verbose {
-            config.verbose = verbose;
-        }
-        if let Some(max_results) = self.max_results {
-            config.max_results = Some(max_results);
-        }
+        overlay(&mut config.paths, self.search_dirs);
+        overlay(&mut config.marker_files, self.marker_files);
+        overlay(&mut config.workspace_files, self.workspace_files);
+        overlay(&mut config.exclude, self.exclude);
+        overlay(&mut config.depth, self.depth);
+        overlay(&mut config.verbose, self.verbose);
+        config.max_results = self.max_results.or(config.max_results);
     }
 }
 
-impl Cli {
+impl SearchArgs {
     fn apply_to(self, config: &mut Config) {
-        if !self.paths.is_empty() {
-            config.paths = self.paths;
-        }
-        if let Some(depth) = self.depth {
-            config.depth = depth;
-        }
+        config.output = self.output_format();
+        config.max_results = self.max_results.or(config.max_results);
+        overlay(&mut config.depth, self.depth);
         if self.verbose {
             config.verbose = true;
         }
-        if let Some(max_results) = self.max_results {
-            config.max_results = Some(max_results);
+        if !self.paths.is_empty() {
+            config.paths = self.paths;
         }
+        // Exclusions accumulate: the command line narrows a configured search
+        // rather than replacing it.
         config.exclude.extend(self.exclude);
-        config.output = if self.json {
+    }
+
+    const fn output_format(&self) -> OutputFormat {
+        if self.json {
             OutputFormat::Json
         } else if self.null {
             OutputFormat::Null
         } else {
             OutputFormat::Path
-        };
+        }
     }
 }
 
@@ -312,10 +317,22 @@ mod tests {
     use std::fs::write;
     use tempfile::TempDir;
 
+    /// Parses `args` and layers it over `path`, the way a run would.
+    fn config_from(args: &[&str], path: Option<&Path>) -> Result<Config> {
+        let cli = Cli::try_parse_from(args).expect("the arguments parse");
+        Config::from_sources(cli.search, path)
+    }
+
+    /// Writes a configuration file holding `contents` and returns its path.
+    fn config_file(temp: &TempDir, contents: &str) -> PathBuf {
+        let path = temp.path().join("config.toml");
+        write(&path, contents).expect("write the configuration file");
+        path
+    }
+
     #[test]
-    fn defaults_are_used_without_a_config_file() -> color_eyre::Result<()> {
-        let cli = Cli::try_parse_from(["mekle"])?;
-        let config = Config::from_sources(cli, None)?;
+    fn defaults_are_used_without_a_config_file() -> Result<()> {
+        let config = config_from(&["mekle"], None)?;
 
         assert_eq!(config.paths, [PathBuf::from(".")]);
         assert_eq!(config.depth, 5);
@@ -333,11 +350,10 @@ mod tests {
     }
 
     #[test]
-    fn file_values_replace_built_in_defaults() -> color_eyre::Result<()> {
-        let temp = TempDir::new()?;
-        let path = temp.path().join("config.toml");
-        write(
-            &path,
+    fn file_values_replace_built_in_defaults() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
+        let path = config_file(
+            &temp,
             r#"
 search_dirs = ["/projects"]
 marker_files = ["project.toml"]
@@ -346,10 +362,9 @@ depth = 12
 verbose = true
 max_results = 20
 "#,
-        )?;
-        let cli = Cli::try_parse_from(["mekle"])?;
+        );
 
-        let config = Config::from_sources(cli, Some(&path))?;
+        let config = config_from(&["mekle"], Some(&path))?;
 
         assert_eq!(config.paths, [PathBuf::from("/projects")]);
         assert_eq!(config.marker_files, ["project.toml"]);
@@ -361,17 +376,17 @@ max_results = 20
     }
 
     #[test]
-    fn command_line_values_override_the_file() -> color_eyre::Result<()> {
-        let temp = TempDir::new()?;
-        let path = temp.path().join("config.toml");
-        write(
-            &path,
+    fn command_line_values_override_the_file() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
+        let path = config_file(
+            &temp,
             "search_dirs = [\"/from-file\"]\ndepth = 12\nmax_results = 20\n",
-        )?;
-        let cli =
-            Cli::try_parse_from(["mekle", "--depth", "3", "--max-results", "2", "/from-cli"])?;
+        );
 
-        let config = Config::from_sources(cli, Some(&path))?;
+        let config = config_from(
+            &["mekle", "--depth", "3", "--max-results", "2", "/from-cli"],
+            Some(&path),
+        )?;
 
         assert_eq!(config.paths, [PathBuf::from("/from-cli")]);
         assert_eq!(config.depth, 3);
@@ -380,26 +395,22 @@ max_results = 20
     }
 
     #[test]
-    fn missing_config_file_is_ignored() -> color_eyre::Result<()> {
-        let temp = TempDir::new()?;
-        let cli = Cli::try_parse_from(["mekle"])?;
+    fn missing_config_file_is_ignored() {
+        let temp = TempDir::new().expect("create temp dir");
 
-        assert_ok!(Config::from_sources(
-            cli,
+        assert_ok!(config_from(
+            &["mekle"],
             Some(&temp.path().join("missing.toml"))
         ));
-        Ok(())
     }
 
     #[test]
-    fn configured_search_dirs_are_expanded() -> color_eyre::Result<()> {
-        let temp = TempDir::new()?;
-        let path = temp.path().join("config.toml");
-        write(&path, "search_dirs = [\"~/repos\", \"/absolute\"]\n")?;
-        let cli = Cli::try_parse_from(["mekle"])?;
+    fn configured_search_dirs_are_expanded() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
+        let path = config_file(&temp, "search_dirs = [\"~/repos\", \"/absolute\"]\n");
         let home = assert_some!(paths::home());
 
-        let config = Config::from_sources(cli, Some(&path))?;
+        let config = config_from(&["mekle"], Some(&path))?;
 
         assert_eq!(
             config.paths,
@@ -409,47 +420,71 @@ max_results = 20
     }
 
     #[test]
-    fn exclusions_are_loaded_from_the_file() -> color_eyre::Result<()> {
-        let temp = TempDir::new()?;
-        let path = temp.path().join("config.toml");
-        write(
-            &path,
+    fn exclusions_are_loaded_from_the_file() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
+        let path = config_file(
+            &temp,
             "exclude = [\"target/\", \"**/vendor/\", \"/archive/\"]\n",
-        )?;
-        let cli = Cli::try_parse_from(["mekle"])?;
+        );
 
-        let config = Config::from_sources(cli, Some(&path))?;
+        let config = config_from(&["mekle"], Some(&path))?;
 
         assert_eq!(config.exclude, ["target/", "**/vendor/", "/archive/"]);
         Ok(())
     }
 
     #[test]
-    fn repeated_cli_exclusions_are_collected() -> color_eyre::Result<()> {
-        let cli = Cli::try_parse_from([
-            "mekle",
-            "--exclude",
-            "target/",
-            "--exclude",
-            "node_modules/",
-        ])?;
-
-        let config = Config::from_sources(cli, None)?;
+    fn repeated_cli_exclusions_are_collected() -> Result<()> {
+        let config = config_from(
+            &[
+                "mekle",
+                "--exclude",
+                "target/",
+                "--exclude",
+                "node_modules/",
+            ],
+            None,
+        )?;
 
         assert_eq!(config.exclude, ["target/", "node_modules/"]);
         Ok(())
     }
 
     #[test]
-    fn cli_exclusions_append_to_configured_ones() -> color_eyre::Result<()> {
-        let temp = TempDir::new()?;
-        let path = temp.path().join("config.toml");
-        write(&path, "exclude = [\"target/\"]\n")?;
-        let cli = Cli::try_parse_from(["mekle", "--exclude", "dist/"])?;
+    fn cli_exclusions_append_to_configured_ones() -> Result<()> {
+        let temp = TempDir::new().expect("create temp dir");
+        let path = config_file(&temp, "exclude = [\"target/\"]\n");
 
-        let config = Config::from_sources(cli, Some(&path))?;
+        let config = config_from(&["mekle", "--exclude", "dist/"], Some(&path))?;
 
         assert_eq!(config.exclude, ["target/", "dist/"]);
+        Ok(())
+    }
+
+    #[test]
+    fn add_carries_the_search_configuration() -> Result<()> {
+        let cli = Cli::try_parse_from(["mekle", "add", "/projects/one"]).expect("arguments parse");
+
+        let invocation = Invocation::from_cli(cli, None)?;
+
+        match invocation {
+            Invocation::Add { path, config } => {
+                assert_eq!(path, PathBuf::from("/projects/one"));
+                assert_eq!(config.depth, 5);
+            }
+            other => panic!("expected an add invocation, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_bare_invocation_searches() -> Result<()> {
+        let cli = Cli::try_parse_from(["mekle", "--json"]).expect("arguments parse");
+
+        match Invocation::from_cli(cli, None)? {
+            Invocation::Find(config) => assert_eq!(config.output, OutputFormat::Json),
+            other => panic!("expected a find invocation, got {other:?}"),
+        }
         Ok(())
     }
 }
